@@ -1,0 +1,15 @@
+# Dev-only Postgres. Credentials here are for local development, never for production.
+name: kas
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: kas
+      POSTGRES_PASSWORD: kas
+      POSTGRES_DB: kas
+    ports:
+      - "5432:5432"
+    volumes:
+      - kas-pg:/var/lib/postgresql/data
+volumes:
+  kas-pg:
