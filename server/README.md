@@ -1,4 +1,4 @@
-# Kas server — sync API + PostgreSQL (tanpa Supabase)
+# Kas server: sync API + PostgreSQL (tanpa Supabase)
 
 Aplikasi HP tetap 100% offline dengan SQLite. Server ini **opsional**: dipakai hanya kalau pengguna
 masuk ke akun di menu *Lainnya → Sync ke server (beta)*, untuk menyalin data antar HP. Tanpa enkripsi end-to-end.

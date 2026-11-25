@@ -3,9 +3,11 @@ import { ActivityIndicator, Alert } from 'react-native';
 import { exportBackup, readBackup } from '../db/backup';
 import { resetSyncState } from '../db/sync';
 import { useSettings } from '../hooks';
-import { Button, C, Card, Field, H, Muted, Screen } from '../ui';
+import { useTheme } from '../theme';
+import { Button, Card, Field, H, Muted, Screen } from '../ui';
 
 export default function BackupScreen() {
+  const t = useTheme();
   const { lastBackup } = useSettings();
   const [pw, setPw] = useState('');
   const [busy, setBusy] = useState(false);
@@ -54,16 +56,16 @@ export default function BackupScreen() {
     <Screen>
       <Card>
         <H>Password backup</H>
-        <Muted>File backup dienkripsi (AES-256) dengan password ini. Tanpa password, file tidak bisa dibuka — termasuk oleh kami.</Muted>
+        <Muted>File backup dienkripsi (AES-256) dengan password ini. Tanpa password ini, file tidak bisa dibuka oleh siapa pun, termasuk Anda sendiri. Simpan baik-baik.</Muted>
         <Field value={pw} onChangeText={setPw} secureTextEntry placeholder="Minimal 6 karakter" autoCapitalize="none" testID="backup-password" />
         <Muted>Backup terakhir: {lastBackup ? new Date(lastBackup).toLocaleString('id-ID') : 'belum pernah'}</Muted>
       </Card>
       {busy ? (
-        <ActivityIndicator color={C.accent} />
+        <ActivityIndicator color={t.primary} accessibilityLabel="Memproses backup" />
       ) : (
         <>
-          <Button title="Ekspor backup" onPress={doExport} disabled={pw.length < 6} testID="export-backup" />
-          <Button kind="ghost" title="Impor dari file…" onPress={doImport} disabled={pw.length < 6} testID="import-backup" />
+          <Button icon="backup-restore" title="Ekspor backup" onPress={doExport} disabled={pw.length < 6} testID="export-backup" />
+          <Button kind="ghost" icon="file-import" title="Impor dari file" onPress={doImport} disabled={pw.length < 6} testID="import-backup" />
         </>
       )}
     </Screen>

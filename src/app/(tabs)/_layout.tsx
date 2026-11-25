@@ -1,16 +1,43 @@
-import { Tabs } from 'expo-router';
-import { Text } from 'react-native';
-import { C } from '../../ui';
-
-const icon = (e: string) => () => <Text style={{ fontSize: 20 }}>{e}</Text>;
+import { router, Tabs } from 'expo-router';
+import { Pressable } from 'react-native';
+import { TabBar } from '../../TabBar';
+import { useTheme } from '../../theme';
+import { Icon } from '../../ui';
 
 export default function TabsLayout() {
+  const t = useTheme();
   return (
-    <Tabs screenOptions={{ tabBarActiveTintColor: C.accent, headerShadowVisible: false, headerStyle: { backgroundColor: C.bg }, sceneStyle: { backgroundColor: C.bg } }}>
-      <Tabs.Screen name="index" options={{ title: 'Beranda', tabBarIcon: icon('🏠'), tabBarButtonTestID: 'tab-home' }} />
-      <Tabs.Screen name="history" options={{ title: 'Riwayat', tabBarIcon: icon('🧾'), tabBarButtonTestID: 'tab-history' }} />
-      <Tabs.Screen name="budget" options={{ title: 'Budget', tabBarIcon: icon('🎯'), tabBarButtonTestID: 'tab-budget' }} />
-      <Tabs.Screen name="settings" options={{ title: 'Lainnya', tabBarIcon: icon('⚙️'), tabBarButtonTestID: 'tab-settings' }} />
+    <Tabs
+      tabBar={(p) => <TabBar {...p} />}
+      screenOptions={{
+        headerShadowVisible: false,
+        headerStyle: { backgroundColor: t.bg },
+        headerTintColor: t.text,
+        headerTitleStyle: { fontWeight: '700' },
+        sceneStyle: { backgroundColor: t.bg },
+      }}
+    >
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Beranda',
+          headerRight: () => (
+            <Pressable
+              onPress={() => router.push('/settings')}
+              accessibilityRole="button"
+              accessibilityLabel="Pengaturan"
+              testID="open-settings"
+              hitSlop={8}
+              style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: 8 }}
+            >
+              <Icon name="cog" size={24} color={t.text} />
+            </Pressable>
+          ),
+        }}
+      />
+      <Tabs.Screen name="history" options={{ title: 'Riwayat' }} />
+      <Tabs.Screen name="report" options={{ title: 'Laporan' }} />
+      <Tabs.Screen name="budget" options={{ title: 'Budget' }} />
     </Tabs>
   );
 }

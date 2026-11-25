@@ -1,21 +1,37 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
-import { router } from 'expo-router';
-import { useState } from 'react';
-import { FlatList, ScrollView, Text, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { ScrollView, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { q, type HistoryFilter } from '../../db/repo';
 import type { Transaction } from '../../db/schema';
 import { fmtDate, useCategories, useWallets } from '../../hooks';
-import { C, Chip, Field, Muted, Row, TxRow, s } from '../../ui';
+import { useTheme } from '../../theme';
+import { Chip, EmptyState, Field, Muted, Row, TxRow, s, useNavScroll, useTabBarSpace, type IconName } from '../../ui';
 
 const LIMIT = 500; // shortcut: newest 500 matches, no paging; switch to FlashList + paging for 20k-row profiling
 
 type Item = { header: string } | Transaction;
 
 export default function History() {
+  const t = useTheme();
   const { wallets } = useWallets();
   const categories = useCategories();
   const [f, setF] = useState<HistoryFilter>({});
+  const onScroll = useNavScroll();
+  const space = useTabBarSpace();
+  // Opened from a Laporan bar: show that category in that period.
+  const params = useLocalSearchParams<{ categoryId?: string; walletId?: string; from?: string; to?: string }>();
+  useEffect(() => {
+    if (params.categoryId || params.walletId)
+      setF({
+        categoryId: params.categoryId,
+        walletId: params.walletId,
+        from: params.from ? new Date(Number(params.from)) : undefined,
+        to: params.to ? new Date(Number(params.to)) : undefined,
+      });
+  }, [params.categoryId, params.walletId, params.from, params.to]);
   const [picking, setPicking] = useState<'from' | 'to' | null>(null);
   const { data } = useLiveQuery(q.history(f, LIMIT), [f.walletId, f.categoryId, f.from?.getTime(), f.to?.getTime(), f.search]);
 
@@ -35,22 +51,23 @@ export default function History() {
   const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: t.bg }}>
       <View style={{ padding: 12, gap: 8 }}>
         <Field placeholder="Cari catatan…" value={f.search ?? ''} onChangeText={(search) => setF((o) => ({ ...o, search }))} testID="search" />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
           {wallets.map((w) => (
-            <Chip key={w.id} label={`${w.icon} ${w.name}`} active={f.walletId === w.id} color={w.color} onPress={() => toggle('walletId', w.id)} />
+            <Chip key={w.id} label={w.name} icon={w.icon as IconName} active={f.walletId === w.id} color={w.color} onPress={() => toggle('walletId', w.id)} />
           ))}
         </ScrollView>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
           {categories.map((c) => (
-            <Chip key={c.id} label={`${c.icon} ${c.name}`} active={f.categoryId === c.id} color={c.color} onPress={() => toggle('categoryId', c.id)} />
+            <Chip key={c.id} label={c.name} active={f.categoryId === c.id} color={c.color} onPress={() => toggle('categoryId', c.id)} />
           ))}
         </ScrollView>
         <Row>
-          <Chip label={f.from ? `Dari ${f.from.toLocaleDateString('id-ID')}` : 'Dari tanggal'} active={!!f.from} onPress={() => (f.from ? setF((o) => ({ ...o, from: undefined })) : setPicking('from'))} testID="filter-from" />
+          <Chip icon="calendar-month" label={f.from ? `Dari ${f.from.toLocaleDateString('id-ID')}` : 'Dari tanggal'} active={!!f.from} onPress={() => (f.from ? setF((o) => ({ ...o, from: undefined })) : setPicking('from'))} testID="filter-from" />
           <Chip
+            icon="calendar-check"
             label={f.to ? `Sampai ${new Date(f.to.getTime() - 1).toLocaleDateString('id-ID')}` : 'Sampai tanggal'}
             active={!!f.to}
             onPress={() => (f.to ? setF((o) => ({ ...o, to: undefined })) : setPicking('to'))}
@@ -71,15 +88,23 @@ export default function History() {
           onDismiss={() => setPicking(null)}
         />
       )}
-      <FlatList
+      <Animated.FlatList
         data={items}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         keyExtractor={(it, i) => ('header' in it ? `h${i}` : it.id)}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
-        ListEmptyComponent={<Muted>Tidak ada transaksi.</Muted>}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: space }}
+        ListEmptyComponent={
+          f.walletId || f.categoryId || f.from || f.to || f.search ? (
+            <Muted>Tidak ada transaksi yang cocok dengan filter ini. Ketuk filter yang aktif untuk melepasnya.</Muted>
+          ) : (
+            <EmptyState text="Belum ada transaksi. Tekan tombol + di bawah untuk mencatat." />
+          )
+        }
         ListFooterComponent={data.length === LIMIT ? <Muted>Menampilkan {LIMIT} terbaru. Persempit filter untuk melihat yang lebih lama.</Muted> : undefined}
         renderItem={({ item }) =>
           'header' in item ? (
-            <Text style={[s.label, { marginTop: 12, color: C.muted }]}>{item.header}</Text>
+            <Text style={[s.label, { marginTop: 12, color: t.muted }]}>{item.header}</Text>
           ) : (
             <TxRow
               t={item}

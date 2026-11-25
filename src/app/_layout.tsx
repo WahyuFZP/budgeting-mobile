@@ -3,9 +3,11 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-native';
 import { initDb } from '../db/client';
-import { seedIfEmpty } from '../db/repo';
+import { hasWallet, seedIfEmpty } from '../db/repo';
+import '../devtools';
 import { biometricEnabled, checkPin, hasPin, promptBiometric, useLock } from '../lock';
-import { Button, C, PinPad } from '../ui';
+import { useTheme } from '../theme';
+import { Button, PinPad } from '../ui';
 
 const RELOCK_AFTER_MS = 60_000; // short trips to the share sheet / file picker don't re-lock
 
@@ -13,13 +15,17 @@ export default function RootLayout() {
   const [state, setState] = useState<'loading' | 'ready' | Error>('loading');
   const { onboarded, locked, set } = useLock();
   const bgAt = useRef(0);
+  const t = useTheme();
 
   useEffect(() => {
     (async () => {
       await initDb();
       seedIfEmpty();
       const pin = await hasPin();
-      set({ onboarded: pin, locked: pin });
+      // Onboarding counts as done only with a PIN AND a wallet: an app closed between the two steps
+      // used to land on a home screen with no wallet to pick (bug report, 25 Nov).
+      const done = pin && hasWallet();
+      set({ onboarded: done, locked: done });
       setState('ready');
     })().catch((e) => setState(e instanceof Error ? e : new Error(String(e))));
   }, [set]);
@@ -35,18 +41,34 @@ export default function RootLayout() {
     return () => sub.remove();
   }, [set]);
 
-  if (state === 'loading') return <ActivityIndicator style={{ flex: 1 }} color={C.accent} />;
+  if (state === 'loading')
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, backgroundColor: t.bg }}>
+        <ActivityIndicator color={t.primary} size="large" />
+        <Text style={{ color: t.muted }}>Membuka data terenkripsi</Text>
+      </View>
+    );
   if (state instanceof Error)
     return (
-      <View style={{ flex: 1, justifyContent: 'center', padding: 24 }}>
-        <Text style={{ color: C.danger }}>Gagal membuka database: {state.message}</Text>
+      <View style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 8, backgroundColor: t.bg }}>
+        <Text style={{ color: t.text, fontSize: 18, fontWeight: '700' }}>Database tidak bisa dibuka</Text>
+        <Text style={{ color: t.expense }}>{state.message}</Text>
+        <Text style={{ color: t.muted }}>Data Anda tidak dihapus. Tutup lalu buka lagi aplikasinya; kalau tetap gagal, pulihkan dari file backup.</Text>
       </View>
     );
 
   return (
     <>
       <StatusBar style="dark" />
-      <Stack screenOptions={{ headerShadowVisible: false, headerStyle: { backgroundColor: C.bg }, contentStyle: { backgroundColor: C.bg } }}>
+      <Stack
+        screenOptions={{
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: t.bg },
+          headerTintColor: t.text,
+          headerTitleStyle: { fontWeight: '700' },
+          contentStyle: { backgroundColor: t.bg },
+        }}
+      >
         <Stack.Protected guard={onboarded}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="tx" options={{ presentation: 'modal', title: 'Transaksi' }} />
@@ -55,6 +77,7 @@ export default function RootLayout() {
           <Stack.Screen name="pin" options={{ presentation: 'modal', title: 'Ubah PIN' }} />
           <Stack.Screen name="backup" options={{ title: 'Backup & Restore' }} />
           <Stack.Screen name="sync" options={{ title: 'Sync' }} />
+          <Stack.Screen name="settings" options={{ title: 'Pengaturan' }} />
         </Stack.Protected>
         <Stack.Protected guard={!onboarded}>
           <Stack.Screen name="onboarding" options={{ headerShown: false }} />
@@ -66,6 +89,7 @@ export default function RootLayout() {
 }
 
 function LockScreen({ onUnlock }: { onUnlock: () => void }) {
+  const t = useTheme();
   const [error, setError] = useState<string>();
   const [fails, setFails] = useState(0);
   const [waitUntil, setWaitUntil] = useState(0);
@@ -92,9 +116,9 @@ function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   };
 
   return (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: C.bg, justifyContent: 'center', alignItems: 'center', gap: 24 }]} testID="lock-screen">
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: t.bg, justifyContent: 'center', alignItems: 'center', gap: 24 }]} testID="lock-screen">
       <PinPad title="Masukkan PIN" error={error} onComplete={submit} />
-      {bio && <Button kind="ghost" title="Pakai biometrik" onPress={tryBio} testID="lock-bio" />}
+      {bio && <Button kind="ghost" icon="fingerprint" title="Buka dengan sidik jari / wajah" onPress={tryBio} testID="lock-bio" />}
     </View>
   );
 }

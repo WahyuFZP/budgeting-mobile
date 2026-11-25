@@ -1,6 +1,7 @@
 import {
   budgetStatus,
   crossedLevel,
+  pace,
   formatRupiah,
   nextPeriod,
   parseRupiah,
@@ -122,5 +123,21 @@ describe('validateTx', () => {
     expect(validateTx({ ...t, toWalletId: null })).not.toBeNull();
     expect(validateTx({ ...t, toWalletId: 'w' })).not.toBeNull();
     expect(validateTx({ ...t, toWalletId: 'w2' })).toBeNull();
+  });
+});
+
+describe('pace', () => {
+  const p = periodFor(new Date(2026, 10, 15), 1); // 1-30 Nov
+  test('allowance per day counts today, rounds down', () => {
+    expect(pace(600_000, 400_000, p, new Date(2026, 10, 25, 21))).toEqual({ daysLeft: 6, perDay: 100_000, avgPerDay: 16_000 });
+    expect(pace(100_000, 0, p, new Date(2026, 10, 28)).perDay).toBe(33_333);
+  });
+  test('last day and overspent', () => {
+    expect(pace(50_000, 0, p, new Date(2026, 10, 30, 23)).daysLeft).toBe(1);
+    expect(pace(-20_000, 120_000, p, new Date(2026, 10, 10)).perDay).toBe(0);
+  });
+  test('payday period crossing the month end', () => {
+    const q = periodFor(new Date(2026, 10, 30), 25); // 25 Nov - 24 Dec
+    expect(pace(300_000, 0, q, new Date(2026, 11, 22)).daysLeft).toBe(3);
   });
 });

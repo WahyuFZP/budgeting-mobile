@@ -7,16 +7,18 @@ import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { crossedLevel, formatRupiah, parseRupiah, periodFor, type TxType } from '../domain';
 import { deleteTx, getTx, q, saveTx, spentInCategory } from '../db/repo';
 import { fmtDate, useCategories, useSettings, useWallets } from '../hooks';
-import { Button, C, Chip, Field, Muted, Row, Screen, s } from '../ui';
+import { useTheme } from '../theme';
+import { Button, Chip, Field, Icon, ItemIcon, Muted, Row, Screen, s, type IconName } from '../ui';
 
-const TYPES: [TxType, string][] = [
-  ['expense', 'Pengeluaran'],
-  ['income', 'Pemasukan'],
-  ['transfer', 'Transfer'],
+const TYPES: [TxType, string, IconName][] = [
+  ['expense', 'Pengeluaran', 'arrow-up-circle'],
+  ['income', 'Pemasukan', 'arrow-down-circle'],
+  ['transfer', 'Transfer', 'swap-horizontal-circle'],
 ];
 
 export default function TxScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
+  const t = useTheme();
   const existing = useMemo(() => (id ? getTx(id) : undefined), [id]);
   const { active } = useWallets();
   const categories = useCategories();
@@ -80,8 +82,8 @@ export default function TxScreen() {
   return (
     <Screen>
       <Row style={{ flexWrap: 'wrap' }}>
-        {TYPES.map(([t, label]) => (
-          <Chip key={t} label={label} active={type === t} onPress={() => (setType(t), setCategoryId(null))} testID={`type-${t}`} />
+        {TYPES.map(([k, label, icon]) => (
+          <Chip key={k} label={label} icon={icon} active={type === k} onPress={() => (setType(k), setCategoryId(null))} testID={`type-${k}`} />
         ))}
       </Row>
 
@@ -92,15 +94,18 @@ export default function TxScreen() {
         onChangeText={setAmount}
         keyboardType="number-pad"
         placeholder="Rp0"
-        placeholderTextColor={C.muted}
-        style={{ fontSize: 44, fontWeight: '800', color: type === 'income' ? C.income : type === 'expense' ? C.expense : C.text, paddingVertical: 8 }}
+        placeholderTextColor={t.muted}
+        style={{ fontSize: 44, fontWeight: '800', fontVariant: ['tabular-nums'], color: type === 'income' ? t.income : type === 'expense' ? t.expense : t.text, paddingVertical: 8 }}
         accessibilityLabel="Nominal"
       />
 
       <Muted>{type === 'transfer' ? 'Dari dompet' : 'Dompet'}</Muted>
+      {active.length === 0 && (
+        <Button kind="ghost" icon="plus" title="Belum ada dompet. Tambah dompet dulu" onPress={() => router.push('/wallet')} testID="tx-add-wallet" />
+      )}
       <Row style={{ flexWrap: 'wrap' }}>
         {active.map((w) => (
-          <Chip key={w.id} label={`${w.icon} ${w.name}`} active={wallet === w.id} color={w.color} onPress={() => setWalletId(w.id)} testID={`wallet-${w.id}`} />
+          <Chip key={w.id} label={w.name} icon={w.icon as IconName} active={wallet === w.id} color={w.color} onPress={() => setWalletId(w.id)} testID={`wallet-${w.id}`} />
         ))}
       </Row>
 
@@ -111,7 +116,7 @@ export default function TxScreen() {
             {active
               .filter((w) => w.id !== wallet)
               .map((w) => (
-                <Chip key={w.id} label={`${w.icon} ${w.name}`} active={toWalletId === w.id} color={w.color} onPress={() => setToWalletId(w.id)} testID={`to-wallet-${w.id}`} />
+                <Chip key={w.id} label={w.name} icon={w.icon as IconName} active={toWalletId === w.id} color={w.color} onPress={() => setToWalletId(w.id)} testID={`to-wallet-${w.id}`} />
               ))}
           </Row>
         </>
@@ -124,10 +129,11 @@ export default function TxScreen() {
               accessibilityRole="button"
               accessibilityState={{ selected: categoryId === c.id }}
               onPress={() => setCategoryId(c.id)}
-              style={{ width: '23%', alignItems: 'center', padding: 8, borderRadius: 12, borderWidth: 2, borderColor: categoryId === c.id ? c.color : 'transparent', backgroundColor: C.card }}
+              style={{ width: '23%', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 4, borderRadius: 12, borderWidth: 2, borderColor: categoryId === c.id ? t.mark : 'transparent', backgroundColor: t.card }}
             >
-              <Text style={{ fontSize: 26 }}>{c.icon}</Text>
-              <Text style={{ fontSize: 12, color: C.text, textAlign: 'center' }} numberOfLines={2}>
+              <ItemIcon icon={c.icon} color={c.color} />
+              {/* 11px + slim side padding fits "Transportasi" on one line instead of splitting the word */}
+              <Text style={{ fontSize: 11, color: t.text, textAlign: 'center', fontWeight: categoryId === c.id ? '700' : '400' }} numberOfLines={2}>
                 {c.name}
               </Text>
             </Pressable>
@@ -135,8 +141,15 @@ export default function TxScreen() {
         </View>
       )}
 
-      <Pressable onPress={() => setPicking(true)} style={s.input} testID="date">
-        <Text style={{ color: C.text }}>📅 {fmtDate(date)}</Text>
+      <Pressable
+        onPress={() => setPicking(true)}
+        style={[s.input, s.row, { backgroundColor: t.card, borderWidth: 1, borderColor: t.line }]}
+        testID="date"
+        accessibilityRole="button"
+        accessibilityLabel={`Tanggal, ${fmtDate(date)}`}
+      >
+        <Icon name="calendar-month" color={t.muted} />
+        <Text style={{ color: t.text }}>{fmtDate(date)}</Text>
       </Pressable>
       {picking && (
         <DateTimePicker
@@ -153,8 +166,8 @@ export default function TxScreen() {
       )}
       <Field placeholder="Catatan (opsional)" value={note} onChangeText={setNote} testID="note" />
 
-      <Button title="Simpan" onPress={save} testID="save-tx" />
-      {existing && <Button kind="danger" title="Hapus" onPress={remove} testID="delete-tx" />}
+      <Button title="Simpan transaksi" icon="check" onPress={save} testID="save-tx" />
+      {existing && <Button kind="danger" title="Hapus transaksi" icon="delete-outline" onPress={remove} testID="delete-tx" />}
     </Screen>
   );
 }

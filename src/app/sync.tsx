@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert } from 'react-native';
 import { getAccount, lastSyncAt, signIn, signOut, syncNow, type SyncAccount } from '../db/sync';
-import { Button, C, Card, Field, H, Muted, Row, Screen } from '../ui';
+import { useTheme } from '../theme';
+import { Button, Card, Field, H, Muted, Row, Screen } from '../ui';
 
 export default function SyncScreen() {
+  const t = useTheme();
   const [account, setAccount] = useState<SyncAccount>(null);
   const [last, setLast] = useState<number | null>(null);
   const [url, setUrl] = useState('http://192.168.1.10:8787');
@@ -60,14 +62,14 @@ export default function SyncScreen() {
         </Muted>
       </Card>
 
-      {busy && <ActivityIndicator color={C.accent} />}
+      {busy && <ActivityIndicator color={t.primary} accessibilityLabel="Menghubungi server" />}
 
       {account ? (
         <Card>
           <Muted>Masuk sebagai {account.email}</Muted>
           <Muted>Server: {account.url}</Muted>
           <Muted>Sync terakhir: {last ? new Date(last).toLocaleString('id-ID') : 'belum pernah'}</Muted>
-          <Button title="Sinkronkan sekarang" onPress={sync} disabled={busy} testID="sync-now" />
+          <Button icon="cloud-sync" title="Sinkronkan sekarang" onPress={sync} disabled={busy} testID="sync-now" />
           <Button kind="ghost" title="Keluar" onPress={logout} disabled={busy} testID="sync-logout" />
         </Card>
       ) : (

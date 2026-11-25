@@ -2,17 +2,19 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Alert, Switch, Text } from 'react-native';
 import { formatRupiah, parseRupiah } from '../domain';
-import { getWallet, saveWallet } from '../db/repo';
+import { WALLET_ICON, getWallet, saveWallet } from '../db/repo';
 import type { Wallet } from '../db/schema';
-import { Button, C, Chip, Field, Muted, PALETTE, Row, Screen } from '../ui';
+import { PALETTE, useTheme } from '../theme';
+import { Button, Chip, ColorPicker, Field, Muted, Row, Screen } from '../ui';
 
 const TYPES: [Wallet['type'], string][] = [
-  ['cash', '💵 Cash'],
-  ['bank', '🏦 Bank'],
-  ['ewallet', '📱 E-wallet'],
+  ['cash', 'Tunai'],
+  ['bank', 'Bank'],
+  ['ewallet', 'E-wallet'],
 ];
 
 export default function WalletScreen() {
+  const t = useTheme();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const w = useMemo(() => (id ? getWallet(id) : undefined), [id]);
   const [name, setName] = useState(w?.name ?? '');
@@ -34,8 +36,8 @@ export default function WalletScreen() {
     <Screen>
       <Field label="Nama" value={name} onChangeText={setName} placeholder="mis. BCA, GoPay" testID="wallet-name" />
       <Row style={{ flexWrap: 'wrap' }}>
-        {TYPES.map(([t, label]) => (
-          <Chip key={t} label={label} active={type === t} onPress={() => setType(t)} testID={`wallet-type-${t}`} />
+        {TYPES.map(([k, label]) => (
+          <Chip key={k} label={label} icon={WALLET_ICON[k]} active={type === k} onPress={() => setType(k)} testID={`wallet-type-${k}`} />
         ))}
       </Row>
       <Field
@@ -46,19 +48,15 @@ export default function WalletScreen() {
         placeholder="Rp0"
         testID="wallet-initial"
       />
-      <Row style={{ flexWrap: 'wrap' }}>
-        {PALETTE.map((c) => (
-          <Chip key={c} label={color === c ? '✓' : '  '} active={color === c} color={c} onPress={() => setColor(c)} />
-        ))}
-      </Row>
+      <ColorPicker value={color} onChange={setColor} />
       {w && (
         <Row style={{ justifyContent: 'space-between' }}>
-          <Text style={{ color: C.text }}>Arsipkan (sembunyikan dari pilihan)</Text>
-          <Switch value={archived} onValueChange={setArchived} testID="wallet-archive" />
+          <Text style={{ color: t.text, flex: 1 }}>Arsipkan (sembunyikan dari pilihan)</Text>
+          <Switch value={archived} onValueChange={setArchived} testID="wallet-archive" accessibilityLabel="Arsipkan dompet" trackColor={{ true: t.mark, false: t.line }} thumbColor={t.card} />
         </Row>
       )}
       {w && <Muted>Dompet tidak dihapus agar riwayat transaksinya tetap utuh.</Muted>}
-      <Button title="Simpan" onPress={save} testID="save-wallet" />
+      <Button title="Simpan dompet" icon="check" onPress={save} testID="save-wallet" />
     </Screen>
   );
 }

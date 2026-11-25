@@ -42,8 +42,10 @@
         {
           "faceIDPermission": "Buka Kas dengan Face ID"
         }
-      ]
+      ],
+      "expo-asset"
     ],
-    "scheme": "kas"
+    "scheme": "kas",
+    "backgroundColor": "#FFFFFF"
   }
 }

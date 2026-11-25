@@ -33,6 +33,12 @@ export const q = {
       .from(transactions)
       .where(and(alive(transactions), gte(transactions.occurredAt, p.start), lt(transactions.occurredAt, p.end))),
   budgets: (p: Period) => db.select().from(budgets).where(and(alive(budgets), eq(budgets.periodStart, p.start))),
+  walletTxCount: (p: Period) =>
+    db
+      .select({ walletId: transactions.walletId, n: count() })
+      .from(transactions)
+      .where(and(alive(transactions), gte(transactions.occurredAt, p.start), lt(transactions.occurredAt, p.end)))
+      .groupBy(transactions.walletId),
   categoryUsage: () =>
     db.select({ categoryId: transactions.categoryId, n: count() }).from(transactions).where(alive(transactions)).groupBy(transactions.categoryId),
   history: (f: HistoryFilter, limit: number) => {
@@ -47,6 +53,7 @@ export const q = {
 };
 
 export const getTx = (id: string) => db.select().from(transactions).where(eq(transactions.id, id)).get();
+export const hasWallet = () => !!db.select({ id: wallets.id }).from(wallets).where(isNull(wallets.deletedAt)).limit(1).get();
 export const getWallet = (id: string) => db.select().from(wallets).where(eq(wallets.id, id)).get();
 export const getCategory = (id: string) => db.select().from(categories).where(eq(categories.id, id)).get();
 
@@ -60,17 +67,17 @@ export function setSetting(key: string, value: string) {
 // ---------- Seed ----------
 
 const DEFAULT_CATEGORIES: [string, string, 'income' | 'expense', string, string][] = [
-  ['default-expense-food', 'Makan & Minum', 'expense', '🍜', '#E4572E'],
-  ['default-expense-transport', 'Transportasi', 'expense', '🛵', '#2E86AB'],
-  ['default-expense-bills', 'Tagihan', 'expense', '💡', '#F2A541'],
-  ['default-expense-shopping', 'Belanja', 'expense', '🛒', '#A23B72'],
-  ['default-expense-fun', 'Hiburan', 'expense', '🎬', '#6C5CE7'],
-  ['default-expense-health', 'Kesehatan', 'expense', '💊', '#00A878'],
-  ['default-expense-edu', 'Pendidikan', 'expense', '📚', '#3D5A80'],
-  [OTHER_EXPENSE, 'Lainnya', 'expense', '📦', '#7A7A7A'],
-  ['default-income-salary', 'Gaji', 'income', '💼', '#00A878'],
-  ['default-income-bonus', 'Bonus', 'income', '🎁', '#F2A541'],
-  [OTHER_INCOME, 'Lainnya', 'income', '📦', '#7A7A7A'],
+  ['default-expense-food', 'Makan & Minum', 'expense', 'silverware-fork-knife', '#A8392D'],
+  ['default-expense-transport', 'Transportasi', 'expense', 'motorbike', '#2E6E8E'],
+  ['default-expense-bills', 'Tagihan', 'expense', 'receipt-text', '#8A5A00'],
+  ['default-expense-shopping', 'Belanja', 'expense', 'cart', '#8E3B5E'],
+  ['default-expense-fun', 'Hiburan', 'expense', 'movie-open', '#5B4B9A'],
+  ['default-expense-health', 'Kesehatan', 'expense', 'medical-bag', '#1F4D3A'],
+  ['default-expense-edu', 'Pendidikan', 'expense', 'school', '#3D5A80'],
+  [OTHER_EXPENSE, 'Lainnya', 'expense', 'dots-horizontal-circle', '#56665C'],
+  ['default-income-salary', 'Gaji', 'income', 'briefcase', '#1F4D3A'],
+  ['default-income-bonus', 'Bonus', 'income', 'gift', '#8A5A00'],
+  [OTHER_INCOME, 'Lainnya', 'income', 'dots-horizontal-circle', '#56665C'],
 ];
 
 // Defaults are identical on every phone; time 0 means any real edit (e.g. hiding one) wins when syncing.
@@ -86,7 +93,8 @@ export function seedIfEmpty() {
 // ---------- Wallets ----------
 
 export type WalletInput = Pick<Wallet, 'name' | 'type' | 'initialBalance' | 'color'> & { id?: string; archived?: boolean };
-const WALLET_ICON = { cash: '💵', bank: '🏦', ewallet: '📱' } as const;
+// Material Community Icons names (see DESIGN.md); drizzle/0001_icons.sql moves old emoji rows over.
+export const WALLET_ICON = { cash: 'cash', bank: 'bank', ewallet: 'cellphone' } as const;
 
 export function saveWallet(w: WalletInput) {
   if (!w.name.trim()) throw new Error('Nama dompet wajib diisi');
@@ -102,7 +110,7 @@ export type CategoryInput = Pick<Category, 'name' | 'kind' | 'icon' | 'color'> &
 
 export function saveCategory(c: CategoryInput) {
   if (!c.name.trim()) throw new Error('Nama kategori wajib diisi');
-  const values = { name: c.name.trim(), icon: c.icon || '🏷️', color: c.color, hidden: !!c.hidden };
+  const values = { name: c.name.trim(), icon: c.icon || 'tag', color: c.color, hidden: !!c.hidden };
   if (c.id) db.update(categories).set({ ...values, updatedAt: new Date() }).where(eq(categories.id, c.id)).run();
   else db.insert(categories).values({ id: randomUUID(), kind: c.kind, ...values, sortOrder: 100, ...stamp() }).run();
 }

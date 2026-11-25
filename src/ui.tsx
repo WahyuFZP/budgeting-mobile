@@ -1,88 +1,245 @@
-// Shared UI bits. Light theme only in v1.0 (dark mode is P1).
-import { useEffect, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, type TextInputProps, type ViewStyle } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+// Shared UI. Colors always come from useTheme() (light/dark follow the phone); `s` holds layout only.
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { Component, lazy, Suspense, useEffect, useState, type ComponentProps, type ReactNode } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View, type PressableProps, type StyleProp, type TextInputProps, type ViewStyle } from 'react-native';
+import Animated, {
+  makeMutable,
+  useAnimatedScrollHandler,
+  useAnimatedProps,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Category, Transaction, Wallet } from './db/schema';
 import { formatRupiah, type BudgetLevel } from './domain';
+import { PALETTE, useTheme, type Palette } from './theme';
 
-export const C = {
-  bg: '#F6F7F9',
-  card: '#FFFFFF',
-  text: '#14161A',
-  muted: '#5C6370', // 5.9:1 on white
-  line: '#E3E6EA',
-  accent: '#0B7A5C', // 5.4:1 on white
-  danger: '#C62828',
-  warn: '#B26A00',
-  income: '#0B7A5C',
-  expense: '#C62828',
-};
-export const PALETTE = ['#E4572E', '#2E86AB', '#F2A541', '#A23B72', '#6C5CE7', '#00A878', '#3D5A80', '#7A7A7A'];
-export const levelColor = (l: BudgetLevel) => (l === 'over' ? C.danger : l === 'warn' ? '#E0A100' : C.accent);
+export type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
+export const Icon = (p: { name: IconName; size?: number; color: string }) => (
+  <MaterialCommunityIcons name={p.name} size={p.size ?? 22} color={p.color} accessibilityElementsHidden importantForAccessibility="no" />
+);
 
-export function Screen({ children, scroll = true }: { children: ReactNode; scroll?: boolean }) {
-  if (!scroll) return <View style={[s.screen, { flex: 1 }]}>{children}</View>;
+const isGlyph = (n: string): n is IconName => n in MaterialCommunityIcons.glyphMap;
+
+/** Category/wallet mark: white glyph on the item's own color. Older rows may still hold an emoji; show it as text. */
+export function ItemIcon({ icon, color, size = 40 }: { icon: string; color: string; size?: number }) {
   return (
-    <ScrollView style={{ backgroundColor: C.bg }} contentContainerStyle={s.screen} keyboardShouldPersistTaps="handled">
-      {children}
-    </ScrollView>
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color, alignItems: 'center', justifyContent: 'center' }}>
+      {isGlyph(icon) ? <Icon name={icon} size={size * 0.55} color="#FFFFFF" /> : <Text style={{ fontSize: size * 0.5 }}>{icon}</Text>}
+    </View>
   );
 }
 
-export const Card = ({ children, style }: { children: ReactNode; style?: ViewStyle }) => <View style={[s.card, style]}>{children}</View>;
-export const H = ({ children }: { children: ReactNode }) => <Text style={s.h}>{children}</Text>;
-export const Muted = ({ children }: { children: ReactNode }) => <Text style={s.muted}>{children}</Text>;
+export const levelColor = (l: BudgetLevel, t: Palette) => (l === 'over' ? t.expense : l === 'warn' ? t.warnBar : t.income);
 
-export function Button({ title, onPress, kind = 'primary', testID, disabled }: { title: string; onPress: () => void; kind?: 'primary' | 'ghost' | 'danger'; testID?: string; disabled?: boolean }) {
+/** Bottom space a tab screen needs so its last item can scroll fully above the floating tab bar
+ *  (bar 64 + its 12 gap + the phone's gesture/nav area + 24 breathing room). */
+export function useTabBarSpace() {
+  return 64 + 12 + useSafeAreaInsets().bottom + 24;
+}
+
+/** 1 while the floating tab bar is slid away. Written by scrolling tab screens, read by TabBar. */
+export const navHidden = makeMutable(0);
+
+/** Scroll handler for tab screens: hide the tab bar while scrolling down (so the last items are not covered),
+ *  bring it back when scrolling up or near the top. Runs on the UI thread. */
+export function useNavScroll() {
+  const last = useSharedValue(0);
+  return useAnimatedScrollHandler({
+    onScroll: (e) => {
+      const y = e.contentOffset.y;
+      const dy = y - last.value;
+      if (y < 40 || dy < -6) navHidden.value = 0;
+      else if (dy > 6) navHidden.value = 1;
+      last.value = y;
+    },
+  });
+}
+
+export function Screen({ children, scroll = true, tab = false }: { children: ReactNode; scroll?: boolean; tab?: boolean }) {
+  const t = useTheme();
+  const onScroll = useNavScroll();
+  const space = useTabBarSpace();
+  if (!scroll) return <View style={[s.screen, { flex: 1, backgroundColor: t.bg }]}>{children}</View>;
+  return (
+    <Animated.ScrollView
+      style={{ backgroundColor: t.bg }}
+      contentContainerStyle={[s.screen, tab && { paddingBottom: space }]}
+      keyboardShouldPersistTaps="handled"
+      onScroll={tab ? onScroll : undefined}
+      scrollEventThrottle={16}
+    >
+      {children}
+    </Animated.ScrollView>
+  );
+}
+
+export function Card({ children, style }: { children: ReactNode; style?: ViewStyle }) {
+  const t = useTheme();
+  return <View style={[s.card, { backgroundColor: t.card }, style]}>{children}</View>;
+}
+
+export function H({ children }: { children: ReactNode }) {
+  return <Text style={[s.h, { color: useTheme().text }]}>{children}</Text>;
+}
+export function Muted({ children }: { children: ReactNode }) {
+  return <Text style={{ color: useTheme().muted }}>{children}</Text>;
+}
+export function T({ children, style }: { children: ReactNode; style?: object }) {
+  return <Text style={[{ color: useTheme().text }, style]}>{children}</Text>;
+}
+
+export function Button({
+  title,
+  onPress,
+  kind = 'primary',
+  icon,
+  testID,
+  disabled,
+}: {
+  title: string;
+  onPress: () => void;
+  kind?: 'primary' | 'ghost' | 'danger';
+  icon?: IconName;
+  testID?: string;
+  disabled?: boolean;
+}) {
+  const t = useTheme();
+  const fg = kind === 'primary' ? t.onPrimary : kind === 'danger' ? t.expense : t.text;
   return (
     <Pressable
       testID={testID}
       accessibilityRole="button"
+      accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [s.btn, kind === 'primary' ? { backgroundColor: C.accent } : { borderWidth: 1, borderColor: kind === 'danger' ? C.danger : C.line }, (pressed || disabled) && { opacity: 0.6 }]}
+      style={({ pressed }) => [
+        s.btn,
+        kind === 'primary' ? { backgroundColor: t.primary } : { borderWidth: 1, borderColor: kind === 'danger' ? t.expense : t.line },
+        (pressed || disabled) && { opacity: 0.6 },
+      ]}
     >
-      <Text style={[s.btnText, { color: kind === 'primary' ? '#fff' : kind === 'danger' ? C.danger : C.text }]}>{title}</Text>
+      {icon && <Icon name={icon} size={20} color={fg} />}
+      <Text style={[s.btnText, { color: fg }]}>{title}</Text>
     </Pressable>
   );
 }
 
-export function Chip({ label, active, onPress, color, testID }: { label: string; active: boolean; onPress: () => void; color?: string; testID?: string }) {
+/** Selected state always uses the theme mark color plus a check, never the item's own color:
+ *  a dark wallet color on a dark card made the selected wallet invisible (bug report, 25 Nov). */
+export function Chip({ label, active, onPress, color, icon, testID }: { label: string; active: boolean; onPress: () => void; color?: string; icon?: IconName; testID?: string }) {
+  const t = useTheme();
+  const bg = active ? t.mark : t.card;
+  const fg = active ? t.onMark : t.text;
   return (
-    <Pressable testID={testID} accessibilityRole="button" accessibilityState={{ selected: active }} onPress={onPress} style={[s.chip, active && { backgroundColor: color ?? C.accent, borderColor: color ?? C.accent }]}>
-      <Text style={{ color: active ? '#fff' : C.text, fontWeight: '600' }}>{label}</Text>
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={[s.chip, { backgroundColor: bg, borderColor: active ? bg : t.line }]}
+    >
+      {active ? <Icon name="check" size={18} color={fg} /> : icon && <Icon name={icon} size={18} color={color ?? fg} />}
+      <Text style={{ color: fg, fontWeight: '600' }}>{label}</Text>
     </Pressable>
   );
 }
 
 export const Row = ({ children, style }: { children: ReactNode; style?: ViewStyle }) => <View style={[s.row, style]}>{children}</View>;
 
-export const Field = (p: TextInputProps & { label?: string }) => (
-  <View style={{ gap: 4 }}>
-    {p.label && <Text style={s.label}>{p.label}</Text>}
-    <TextInput placeholderTextColor={C.muted} {...p} style={[s.input, p.style]} />
-  </View>
-);
+export function Field(p: TextInputProps & { label?: string }) {
+  const t = useTheme();
+  const [focused, setFocused] = useState(false);
+  return (
+    <View style={{ gap: 4 }}>
+      {p.label && <Text style={[s.label, { color: t.muted }]}>{p.label}</Text>}
+      <TextInput
+        placeholderTextColor={t.muted}
+        accessibilityLabel={p.label}
+        {...p}
+        onFocus={(e) => (setFocused(true), p.onFocus?.(e))}
+        onBlur={(e) => (setFocused(false), p.onBlur?.(e))}
+        style={[s.input, { backgroundColor: t.card, color: t.text, borderColor: focused ? t.mark : t.line, borderWidth: focused ? 2 : 1 }, p.style]}
+      />
+    </View>
+  );
+}
 
-/** Spring-animated progress bar (Reanimated, UI thread; honours system "reduce motion" by default). */
+/** Spring-animated progress bar (UI thread). Reanimated skips the spring when the phone asks for reduced motion. */
 export function Bar({ pct, color }: { pct: number; color: string }) {
+  const t = useTheme();
   const w = useSharedValue(0);
   useEffect(() => {
     w.value = withSpring(Math.min(pct, 100), { damping: 18 });
   }, [pct, w]);
   const style = useAnimatedStyle(() => ({ width: `${w.value}%` }));
   return (
-    <View style={s.barBg}>
+    <View style={[s.barBg, { backgroundColor: t.line }]} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: Math.round(Math.min(pct, 100)) }}>
       <Animated.View style={[s.barFg, { backgroundColor: color }, style]} />
     </View>
   );
 }
 
+const AnimatedInput = Animated.createAnimatedComponent(TextInput);
+
+/** Money figure that rolls to its new value, so the user sees a balance change instead of a jump. */
+export function RollingAmount({ value, style, testID }: { value: number; style?: object; testID?: string }) {
+  const reduced = useReducedMotion();
+  const v = useSharedValue(value);
+  useEffect(() => {
+    v.value = reduced ? value : withTiming(value, { duration: 600 });
+  }, [value, reduced, v]);
+  const props = useAnimatedProps(() => ({ text: formatRupiah(Math.round(v.value)), defaultValue: formatRupiah(Math.round(v.value)) }) as object);
+  return (
+    <AnimatedInput
+      testID={testID}
+      editable={false}
+      animatedProps={props}
+      accessibilityLabel={formatRupiah(value)}
+      style={[{ padding: 0, fontVariant: ['tabular-nums'] }, style]}
+    />
+  );
+}
+
+/** Card that tilts toward the finger (parallax). Raw touch events, so it never steals the ScrollView's drag. */
+export function TiltCard({ children, style }: { children: ReactNode; style?: ViewStyle }) {
+  const reduced = useReducedMotion();
+  const rx = useSharedValue(0);
+  const ry = useSharedValue(0);
+  const [size, setSize] = useState({ w: 1, h: 1 });
+  const tilt = (x: number, y: number) => {
+    if (reduced) return;
+    ry.value = withSpring(((x / size.w) * 2 - 1) * 8);
+    rx.value = withSpring(-((y / size.h) * 2 - 1) * 8);
+  };
+  const reset = () => {
+    rx.value = withSpring(0);
+    ry.value = withSpring(0);
+  };
+  const anim = useAnimatedStyle(() => ({ transform: [{ perspective: 800 }, { rotateX: `${rx.value}deg` }, { rotateY: `${ry.value}deg` }] }));
+  return (
+    <Animated.View
+      onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
+      onTouchStart={(e) => tilt(e.nativeEvent.locationX, e.nativeEvent.locationY)}
+      onTouchMove={(e) => tilt(e.nativeEvent.locationX, e.nativeEvent.locationY)}
+      onTouchEnd={reset}
+      onTouchCancel={reset}
+      style={[style, anim]}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
 /** 6-digit PIN pad used by onboarding, lock screen and PIN change. */
 export function PinPad({ title, error, onComplete }: { title: string; error?: string; onComplete: (pin: string) => void }) {
+  const t = useTheme();
   const [pin, setPin] = useState('');
   const press = (k: string) => {
-    if (k === '⌫') return setPin((p) => p.slice(0, -1));
+    if (k === 'del') return setPin((p) => p.slice(0, -1));
     const next = (pin + k).slice(0, 6);
     setPin(next);
     if (next.length === 6) {
@@ -92,18 +249,27 @@ export function PinPad({ title, error, onComplete }: { title: string; error?: st
   };
   return (
     <View style={{ alignItems: 'center', gap: 20 }}>
-      <Text style={s.h}>{title}</Text>
+      <Text style={[s.h, { color: t.text }]}>{title}</Text>
       <Row style={{ gap: 14 }}>
         {Array.from({ length: 6 }, (_, i) => (
-          <View key={i} style={[s.dot, i < pin.length && { backgroundColor: C.accent }]} />
+          <View key={i} style={[s.dot, { borderColor: t.mark }, i < pin.length && { backgroundColor: t.mark }]} />
         ))}
       </Row>
-      <Text style={{ color: C.danger, minHeight: 20 }}>{error ?? ''}</Text>
+      <Text style={{ color: t.expense, minHeight: 20 }} accessibilityLiveRegion="polite">
+        {error ?? ''}
+      </Text>
       <View style={{ width: 270, flexDirection: 'row', flexWrap: 'wrap', gap: 15 }}>
-        {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'].map((k, i) =>
+        {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'].map((k, i) =>
           k ? (
-            <Pressable key={i} testID={`pin-${k === '⌫' ? 'del' : k}`} accessibilityLabel={k === '⌫' ? 'Hapus' : k} onPress={() => press(k)} style={({ pressed }) => [s.key, pressed && { backgroundColor: C.line }]}>
-              <Text style={{ fontSize: 26, fontWeight: '600', color: C.text }}>{k}</Text>
+            <Pressable
+              key={i}
+              testID={`pin-${k}`}
+              accessibilityRole="button"
+              accessibilityLabel={k === 'del' ? 'Hapus angka' : k}
+              onPress={() => press(k)}
+              style={({ pressed }) => [s.key, { backgroundColor: pressed ? t.line : t.card }]}
+            >
+              {k === 'del' ? <Icon name="backspace-outline" size={26} color={t.text} /> : <Text style={{ fontSize: 26, fontWeight: '600', color: t.text }}>{k}</Text>}
             </Pressable>
           ) : (
             <View key={i} style={{ width: 80, height: 64 }} />
@@ -115,41 +281,136 @@ export function PinPad({ title, error, onComplete }: { title: string; error?: st
 }
 
 /** One transaction line; tap opens it for edit. */
-export function TxRow({ t, cat, wallet, toWallet, onPress }: { t: Transaction; cat?: Category; wallet?: Wallet; toWallet?: Wallet; onPress: () => void }) {
-  const sign = t.type === 'income' ? '+' : t.type === 'expense' ? '-' : '';
-  const title = t.type === 'transfer' ? `Transfer → ${toWallet?.name ?? '?'}` : (cat?.name ?? 'Tanpa kategori');
+export function TxRow({ t: tx, cat, wallet, toWallet, onPress }: { t: Transaction; cat?: Category; wallet?: Wallet; toWallet?: Wallet; onPress: () => void }) {
+  const t = useTheme();
+  const transfer = tx.type === 'transfer';
+  const sign = tx.type === 'income' ? '+' : tx.type === 'expense' ? '-' : '';
+  const title = transfer ? `Transfer ke ${toWallet?.name ?? '?'}` : (cat?.name ?? 'Tanpa kategori');
   return (
-    <Pressable onPress={onPress} testID={`tx-${t.id}`} accessibilityRole="button" style={({ pressed }) => [s.row, { paddingVertical: 10 }, pressed && { opacity: 0.6 }]}>
-      <Text style={{ fontSize: 22, width: 32 }}>{t.type === 'transfer' ? '🔁' : (cat?.icon ?? '🏷️')}</Text>
+    <Pressable
+      onPress={onPress}
+      testID={`tx-${tx.id}`}
+      accessibilityRole="button"
+      accessibilityLabel={`${title}, ${sign}${formatRupiah(tx.amount)}`}
+      style={({ pressed }) => [s.row, { paddingVertical: 10, gap: 12 }, pressed && { opacity: 0.6 }]}
+    >
+      <ItemIcon icon={transfer ? 'swap-horizontal' : (cat?.icon ?? 'tag')} color={transfer ? t.muted : (cat?.color ?? t.muted)} />
       <View style={{ flex: 1 }}>
-        <Text style={{ color: C.text, fontWeight: '600' }}>{title}</Text>
-        <Text style={s.muted} numberOfLines={1}>
+        <Text style={{ color: t.text, fontWeight: '600' }} numberOfLines={1}>
+          {title}
+        </Text>
+        <Text style={{ color: t.muted }} numberOfLines={1}>
           {wallet?.name}
-          {t.note ? ` · ${t.note}` : ''}
+          {tx.note ? `, ${tx.note}` : ''}
         </Text>
       </View>
-      <Text style={{ fontWeight: '700', color: t.type === 'income' ? C.income : t.type === 'expense' ? C.expense : C.text }}>
+      <Text style={{ fontWeight: '700', fontVariant: ['tabular-nums'], color: tx.type === 'income' ? t.income : tx.type === 'expense' ? t.expense : t.text }}>
         {sign}
-        {formatRupiah(t.amount)}
+        {formatRupiah(tx.amount)}
       </Text>
     </Pressable>
   );
 }
 
 export const s = StyleSheet.create({
-  screen: { padding: 16, gap: 12, backgroundColor: C.bg, paddingBottom: 100 },
-  card: { backgroundColor: C.card, borderRadius: 16, padding: 16, gap: 8 },
-  h: { fontSize: 18, fontWeight: '700', color: C.text },
-  big: { fontSize: 32, fontWeight: '800', color: C.text },
-  muted: { color: C.muted },
-  label: { color: C.muted, fontWeight: '600' },
+  screen: { padding: 16, gap: 12, paddingBottom: 32 },
+  card: { borderRadius: 16, padding: 16, gap: 8 },
+  h: { fontSize: 18, fontWeight: '700' },
+  label: { fontWeight: '600' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  btn: { paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, alignItems: 'center' },
+  btn: { minHeight: 48, paddingHorizontal: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
   btnText: { fontWeight: '700', fontSize: 16 },
-  chip: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, borderWidth: 1, borderColor: C.line, backgroundColor: C.card },
-  input: { backgroundColor: C.card, borderWidth: 1, borderColor: C.line, borderRadius: 12, padding: 12, fontSize: 16, color: C.text },
-  barBg: { height: 8, backgroundColor: C.line, borderRadius: 4, overflow: 'hidden' },
+  chip: { minHeight: 40, paddingHorizontal: 14, borderRadius: 20, borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  input: { borderRadius: 12, padding: 12, fontSize: 16 },
+  barBg: { height: 8, borderRadius: 4, overflow: 'hidden' },
   barFg: { height: 8, borderRadius: 4 },
-  dot: { width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: C.accent },
-  key: { width: 80, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: C.card },
+  dot: { width: 16, height: 16, borderRadius: 8, borderWidth: 2 },
+  key: { width: 80, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' },
 });
+
+const COLOR_NAMES = ['biru tua', 'hijau', 'biru laut', 'cokelat emas', 'merah anggur', 'ungu', 'merah', 'abu arang'];
+
+/** Color swatches for wallets and categories (colors from theme PALETTE, all pass 4.5:1 with a white icon). */
+export function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+  const t = useTheme();
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={[s.label, { color: t.muted }]}>Warna</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+        {PALETTE.map((c, i) => (
+          <Pressable
+            key={c}
+            onPress={() => onChange(c)}
+            accessibilityRole="radio"
+            accessibilityLabel={COLOR_NAMES[i]}
+            accessibilityState={{ checked: value === c }}
+            style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: c, alignItems: 'center', justifyContent: 'center', borderWidth: value === c ? 3 : 0, borderColor: t.text }}
+          >
+            {value === c && <Icon name="check" size={22} color="#FFFFFF" />}
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+/** Static stand-in: shown while three.js loads, and instead of the piggy if the GPU path fails. */
+export const PiggyFallback = ({ size = 240 }: { size?: number }) => {
+  const t = useTheme();
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width: size * 0.6, height: size * 0.5, borderRadius: size * 0.25, backgroundColor: t.accent }} />
+    </View>
+  );
+};
+
+export class PiggyBoundary extends Component<{ children: ReactNode; size?: number }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? <PiggyFallback size={this.props.size} /> : this.props.children;
+  }
+}
+
+const LazyPiggy = lazy(() => import('./Piggy3D'));
+
+/** Empty screen with the mascot above the message, so "nothing here yet" still points to the next step. */
+export function EmptyState({ text }: { text: string }) {
+  const t = useTheme();
+  return (
+    <View style={{ alignItems: 'center', gap: 6, paddingVertical: 8 }}>
+      <PiggyBoundary size={140}>
+        <Suspense fallback={<PiggyFallback size={140} />}>
+          <LazyPiggy size={140} />
+        </Suspense>
+      </PiggyBoundary>
+      <Text style={{ color: t.muted, textAlign: 'center' }}>{text}</Text>
+    </View>
+  );
+}
+
+const APressable = Animated.createAnimatedComponent(Pressable);
+
+/** Pressable card that sinks slightly under the finger and springs back: tactile feedback that the card is tappable. */
+export function PressScale({ style, children, ...p }: Omit<PressableProps, 'style' | 'children'> & { style?: StyleProp<ViewStyle>; children: ReactNode }) {
+  const sc = useSharedValue(1);
+  const anim = useAnimatedStyle(() => ({ transform: [{ scale: sc.value }] }));
+  return (
+    <APressable
+      {...p}
+      onPressIn={(e) => {
+        sc.value = withSpring(0.97, { damping: 20, stiffness: 400 });
+        p.onPressIn?.(e);
+      }}
+      onPressOut={(e) => {
+        sc.value = withSpring(1, { damping: 14, stiffness: 260 });
+        p.onPressOut?.(e);
+      }}
+      style={[style, anim]}
+    >
+      {children}
+    </APressable>
+  );
+}

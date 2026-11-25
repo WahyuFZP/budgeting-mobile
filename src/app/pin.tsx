@@ -2,9 +2,11 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, View } from 'react-native';
 import { checkPin, setPin } from '../lock';
-import { C, PinPad } from '../ui';
+import { useTheme } from '../theme';
+import { PinPad } from '../ui';
 
 export default function ChangePin() {
+  const t = useTheme();
   const [step, setStep] = useState<'old' | 'new' | 'confirm'>('old');
   const [next, setNext] = useState('');
   const [error, setError] = useState<string>();
@@ -29,7 +31,7 @@ export default function ChangePin() {
   };
 
   return (
-    <View style={{ flex: 1, justifyContent: 'center', backgroundColor: C.bg }}>
+    <View style={{ flex: 1, justifyContent: 'center', backgroundColor: t.bg }}>
       <PinPad key={step} title={step === 'old' ? 'PIN lama' : step === 'new' ? 'PIN baru' : 'Ulangi PIN baru'} error={error} onComplete={onComplete} />
     </View>
   );

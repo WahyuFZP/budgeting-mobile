@@ -13,6 +13,7 @@ export function parseRupiah(input: string): number | null {
 }
 
 export function formatRupiah(n: number): string {
+  'worklet'; // also runs on the UI thread for the rolling balance
   const sign = n < 0 ? '-' : '';
   return `${sign}Rp${Math.abs(Math.trunc(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
 }
@@ -107,6 +108,19 @@ export function crossedLevel(limit: number, before: number, after: number): Budg
   const a = budgetStatus(limit, before).level;
   const b = budgetStatus(limit, after).level;
   return rank[b] > rank[a] ? b : null;
+}
+
+// ---------- Spending pace ----------
+
+const DAY = 86_400_000;
+
+/** How much can still be spent per day until the period ends, and the average spent per day so far.
+ *  Both count today. Integer Rupiah, rounded down so following the allowance never overspends. */
+export function pace(remaining: number, spent: number, p: Period, now: Date) {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const daysLeft = Math.max(1, Math.round((p.end.getTime() - today.getTime()) / DAY));
+  const daysIn = Math.max(1, Math.round((today.getTime() - p.start.getTime()) / DAY) + 1);
+  return { daysLeft, perDay: remaining > 0 ? Math.floor(remaining / daysLeft) : 0, avgPerDay: Math.round(spent / daysIn) };
 }
 
 // ---------- Transaction validation ----------
