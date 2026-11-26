@@ -6,7 +6,7 @@ import { router, type Href } from 'expo-router';
 import { periodFor, validateTx, walletBalances } from './domain';
 import { getSetting, q } from './db/repo';
 
-const SCREENS = ['/', '/history', '/report', '/budget', '/settings', '/tx', '/wallet', '/category', '/backup', '/sync', '/pin'];
+const SCREENS = ['/', '/history', '/report', '/budget', '/settings', '/reminders', '/recurring', '/rule', '/tx', '/wallet', '/category', '/backup', '/sync', '/pin'];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function check() {
