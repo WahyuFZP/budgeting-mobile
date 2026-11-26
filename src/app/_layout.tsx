@@ -7,6 +7,7 @@ import { hasWallet, seedIfEmpty } from '../db/repo';
 import '../devtools';
 import { biometricEnabled, checkPin, hasPin, promptBiometric, useLock } from '../lock';
 import { useTheme } from '../theme';
+import { FeedbackHost } from '../feedback';
 import { Button, PinPad } from '../ui';
 
 const RELOCK_AFTER_MS = 60_000; // short trips to the share sheet / file picker don't re-lock
@@ -72,18 +73,21 @@ export default function RootLayout() {
         <Stack.Protected guard={onboarded}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="tx" options={{ presentation: 'modal', title: 'Transaksi' }} />
+          <Stack.Screen name="detail" options={{ presentation: 'modal', title: 'Detail transaksi' }} />
           <Stack.Screen name="wallet" options={{ presentation: 'modal', title: 'Dompet' }} />
           <Stack.Screen name="category" options={{ presentation: 'modal', title: 'Kategori' }} />
           <Stack.Screen name="pin" options={{ presentation: 'modal', title: 'Ubah PIN' }} />
           <Stack.Screen name="backup" options={{ title: 'Backup & Restore' }} />
           <Stack.Screen name="sync" options={{ title: 'Sync' }} />
           <Stack.Screen name="settings" options={{ title: 'Pengaturan' }} />
+          <Stack.Screen name="reminders" options={{ title: 'Pengingat' }} />
         </Stack.Protected>
         <Stack.Protected guard={!onboarded}>
           <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         </Stack.Protected>
       </Stack>
       {onboarded && locked && <LockScreen onUnlock={() => set({ locked: false })} />}
+      <FeedbackHost />
     </>
   );
 }

@@ -18,6 +18,9 @@ export function formatRupiah(n: number): string {
   return `${sign}Rp${Math.abs(Math.trunc(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
 }
 
+/** What shows instead of an amount while the user has hidden their balances (eye toggle). */
+export const HIDDEN_AMOUNT = 'Rp ••••••';
+
 export function isValidAmount(n: unknown): n is number {
   return Number.isSafeInteger(n) && (n as number) > 0;
 }
@@ -141,4 +144,67 @@ export function validateTx(t: TxInput): string | null {
     if (t.toWalletId === t.walletId) return 'Dompet asal dan tujuan harus berbeda';
   } else if (!t.categoryId) return 'Pilih kategori';
   return null;
+}
+
+// ---------- Reminders (bell on Beranda) ----------
+
+export type Reminder = { id: string; icon: 'backup' | 'budget-warn' | 'budget-over' | 'today'; title: string; body: string; href: '/backup' | '/budget' | '/tx' };
+
+/** Things worth the user's attention right now, most urgent first. Pure: derived only from the given facts. */
+export function reminders(f: {
+  now: Date;
+  lastBackup: number | null;
+  firstUse: number;
+  budgets: { name: string; limit: number; spent: number }[];
+  hasAnyTx: boolean;
+  hasTxToday: boolean;
+}): Reminder[] {
+  const out: Reminder[] = [];
+  for (const b of f.budgets) {
+    const s = budgetStatus(b.limit, b.spent);
+    if (s.level === 'over')
+      out.push({ id: `over-${b.name}`, icon: 'budget-over', title: `Budget ${b.name} terlampaui`, body: `Terpakai ${Math.round(s.pct)}% dari batas.`, href: '/budget' });
+  }
+  for (const b of f.budgets) {
+    const s = budgetStatus(b.limit, b.spent);
+    if (s.level === 'warn')
+      out.push({ id: `warn-${b.name}`, icon: 'budget-warn', title: `Budget ${b.name} hampir habis`, body: `Terpakai ${Math.round(s.pct)}%, sisa ${formatRupiah(s.remaining)}.`, href: '/budget' });
+  }
+  const days = Math.floor((f.now.getTime() - (f.lastBackup ?? f.firstUse)) / DAY);
+  if (days >= 30)
+    out.push({
+      id: 'backup',
+      icon: 'backup',
+      title: f.lastBackup ? `Sudah ${days} hari tanpa backup` : 'Belum pernah backup',
+      body: 'Data hanya ada di HP ini. Simpan salinan terenkripsi supaya aman kalau HP rusak atau hilang.',
+      href: '/backup',
+    });
+  if (f.hasAnyTx && !f.hasTxToday)
+    out.push({ id: 'today', icon: 'today', title: 'Belum ada catatan hari ini', body: 'Catat pengeluaran hari ini selagi masih ingat.', href: '/tx' });
+  return out;
+}
+
+// ---------- What the squirrel says (speech bubble on Beranda) ----------
+
+/** Short lines for the mascot's speech bubble, most relevant first, built only from real figures.
+ *  With balances hidden, amounts are masked so the bubble never reveals them. */
+export function squirrelLines(f: {
+  budget: { limit: number; remaining: number; level: BudgetLevel };
+  perDay: number;
+  daysLeft: number;
+  spentToday: number;
+  hasAnyTx: boolean;
+  reminderTitles: string[];
+  hidden: boolean;
+}): string[] {
+  const rp = (n: number) => (f.hidden ? 'Rp ••••' : formatRupiah(n));
+  const out: string[] = [];
+  if (f.budget.limit <= 0) out.push('Atur budget dulu ya, nanti aku hitung jatah harianmu sampai gajian.');
+  else if (f.budget.level === 'over') out.push('Budget periode ini sudah lewat. Yuk tahan belanja sampai gajian.');
+  else if (f.budget.level === 'warn') out.push(`Pelan-pelan ya, sisa budget ${rp(f.budget.remaining)} untuk ${f.daysLeft} hari lagi.`);
+  else out.push(`Jatah belanja hari ini ${rp(f.perDay)}. Masih aman!`);
+  if (f.hasAnyTx) out.push(f.spentToday > 0 ? `Hari ini sudah keluar ${rp(f.spentToday)}.` : 'Belum ada pengeluaran hari ini. Hemat!');
+  for (const r of f.reminderTitles) out.push(`${r}.`);
+  out.push('Aku simpan biji ek untuk nanti. Kamu juga ya!');
+  return out;
 }

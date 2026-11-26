@@ -1,13 +1,14 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
-import { Alert, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Pressable, Text, View, useWindowDimensions } from 'react-native';
+import Animated, { interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, type SharedValue } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatRupiah, parseRupiah } from '../domain';
 import { saveWallet, setSetting } from '../db/repo';
 import { biometricAvailable, hasPin, setBiometric, setPin, useLock } from '../lock';
 import { PALETTE, useTheme } from '../theme';
-import { Button, Card, Field, H, Icon, Muted, PiggyBoundary, PiggyFallback, PinPad, Row, Screen, type IconName } from '../ui';
+import { Button, Card, Field, H, Icon, Muted, Forest, PinPad, Row, Screen, type IconName } from '../ui';
+import { toast } from '../feedback';
 
-const Piggy3D = lazy(() => import('../Piggy3D'));
 
 const INTRO: [IconName, string, string][] = [
   ['shield-lock', 'Data tetap di HP ini', 'Tersimpan terenkripsi. Tanpa akun, tanpa server, jalan tanpa internet.'],
@@ -33,13 +34,13 @@ export default function Onboarding() {
 
   const finish = () => {
     const day = Number(payday);
-    if (!Number.isInteger(day) || day < 1 || day > 31) return Alert.alert('Tanggal gajian harus antara 1 dan 31');
+    if (!Number.isInteger(day) || day < 1 || day > 31) return toast('Tanggal gajian harus antara 1 dan 31', 'error');
     try {
       saveWallet({ name, type: 'cash', initialBalance: parseRupiah(balance) ?? 0, color: PALETTE[0] });
       setSetting('payday', String(day));
       done({ onboarded: true, locked: false });
     } catch (e) {
-      Alert.alert('Belum bisa disimpan', (e as Error).message);
+      toast('Belum bisa disimpan', 'error', (e as Error).message);
     }
   };
 
@@ -73,31 +74,7 @@ export default function Onboarding() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Screen>
-        {step === 'intro' && (
-          <>
-            <View style={{ alignItems: 'center' }}>
-              <PiggyBoundary>
-                <Suspense fallback={<PiggyFallback />}>
-                  <Piggy3D alwaysLive />
-                </Suspense>
-              </PiggyBoundary>
-            </View>
-            <Text style={{ color: t.text, fontSize: 40, fontWeight: '800' }}>Kas</Text>
-            <Text style={{ color: t.muted, fontSize: 17 }}>Catat uang keluar-masuk, tahu sisa budget sampai gajian berikutnya.</Text>
-            <View style={{ gap: 16, marginVertical: 12 }}>
-              {INTRO.map(([icon, title, body]) => (
-                <Row key={title} style={{ gap: 14, alignItems: 'flex-start' }}>
-                  <Icon name={icon} size={28} color={t.income} />
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <Text style={{ color: t.text, fontWeight: '700', fontSize: 16 }}>{title}</Text>
-                    <Muted>{body}</Muted>
-                  </View>
-                </Row>
-              ))}
-            </View>
-            <Button title="Buat PIN dan mulai" icon="lock" onPress={() => setStep('pin')} testID="onb-start" />
-          </>
-        )}
+        {step === 'intro' && <Intro onDone={() => setStep('pin')} />}
         {step === 'bio' && (
           <Card>
             <H>Buka dengan sidik jari / wajah?</H>
@@ -125,5 +102,70 @@ export default function Onboarding() {
         )}
       </Screen>
     </SafeAreaView>
+  );
+}
+
+/** Page dot that widens as its slide scrolls into view. */
+function Dot({ i, x, w }: { i: number; x: SharedValue<number>; w: number }) {
+  const t = useTheme();
+  const style = useAnimatedStyle(() => {
+    const d = [(i - 1) * w, i * w, (i + 1) * w];
+    return { width: interpolate(x.value, d, [8, 24, 8], 'clamp'), opacity: interpolate(x.value, d, [0.35, 1, 0.35], 'clamp') };
+  });
+  return <Animated.View style={[{ height: 8, borderRadius: 4, backgroundColor: t.primary }, style]} />;
+}
+
+/** Welcome: the squirrel's forest stays put while three short slides explain Kas underneath. */
+function Intro({ onDone }: { onDone: () => void }) {
+  const t = useTheme();
+  const { width } = useWindowDimensions();
+  const w = width - 32; // Screen padding
+  const x = useSharedValue(0);
+  const [page, setPage] = useState(0);
+  const pager = useRef<Animated.ScrollView>(null);
+  const onScroll = useAnimatedScrollHandler((e) => {
+    x.value = e.contentOffset.x;
+  });
+  const last = page === INTRO.length - 1;
+  const next = () => (last ? onDone() : pager.current?.scrollTo({ x: (page + 1) * w, animated: true }));
+
+  return (
+    <>
+      <Row style={{ justifyContent: 'space-between' }}>
+        <Text style={{ color: t.text, fontSize: 28, fontWeight: '800' }}>Kas</Text>
+        {!last && (
+          <Pressable onPress={onDone} accessibilityRole="button" hitSlop={10} testID="onb-skip" style={{ minHeight: 44, justifyContent: 'center' }}>
+            <Text style={{ color: t.mark, fontWeight: '600' }}>Lewati</Text>
+          </Pressable>
+        )}
+      </Row>
+      <View style={{ alignItems: 'center' }}>
+        <Forest width={Math.min(320, w)} height={230} alwaysLive />
+      </View>
+      <Animated.ScrollView
+        ref={pager}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        onMomentumScrollEnd={(e) => setPage(Math.round(e.nativeEvent.contentOffset.x / w))}
+        style={{ width: w }}
+      >
+        {INTRO.map(([icon, title, body]) => (
+          <View key={title} style={{ width: w, gap: 8, paddingRight: 8 }} accessible accessibilityLabel={`${title}. ${body}`}>
+            <Icon name={icon} size={32} color={t.income} />
+            <Text style={{ color: t.text, fontWeight: '800', fontSize: 22 }}>{title}</Text>
+            <Text style={{ color: t.muted, fontSize: 16 }}>{body}</Text>
+          </View>
+        ))}
+      </Animated.ScrollView>
+      <Row style={{ gap: 6, justifyContent: 'center', marginVertical: 8 }}>
+        {INTRO.map((_, i) => (
+          <Dot key={i} i={i} x={x} w={w} />
+        ))}
+      </Row>
+      <Button title={last ? 'Buat PIN dan mulai' : 'Lanjut'} icon={last ? 'lock' : undefined} onPress={next} testID={last ? 'onb-start' : 'onb-next'} />
+    </>
   );
 }

@@ -1,9 +1,10 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, View } from 'react-native';
+import { View } from 'react-native';
 import { checkPin, setPin } from '../lock';
 import { useTheme } from '../theme';
 import { PinPad } from '../ui';
+import { toast } from '../feedback';
 
 export default function ChangePin() {
   const t = useTheme();
@@ -26,7 +27,7 @@ export default function ChangePin() {
       return setStep('new');
     }
     await setPin(p);
-    Alert.alert('PIN diubah');
+    toast('PIN diubah', 'success', 'Pakai PIN baru saat membuka Kas.');
     router.back();
   };
 

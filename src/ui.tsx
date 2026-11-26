@@ -38,7 +38,7 @@ export const levelColor = (l: BudgetLevel, t: Palette) => (l === 'over' ? t.expe
 /** Bottom space a tab screen needs so its last item can scroll fully above the floating tab bar
  *  (bar 64 + its 12 gap + the phone's gesture/nav area + 24 breathing room). */
 export function useTabBarSpace() {
-  return 64 + 12 + useSafeAreaInsets().bottom + 24;
+  return 68 + 12 + useSafeAreaInsets().bottom + 32; // bar 68 + gap 12 + raised fab clearance
 }
 
 /** 1 while the floating tab bar is slid away. Written by scrolling tab screens, read by TabBar. */
@@ -328,7 +328,7 @@ export const s = StyleSheet.create({
   key: { width: 80, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' },
 });
 
-const COLOR_NAMES = ['biru tua', 'hijau', 'biru laut', 'cokelat emas', 'merah anggur', 'ungu', 'merah', 'abu arang'];
+const COLOR_NAMES = ['hijau hutan', 'hijau lumut', 'biru danau', 'cokelat tanah', 'merah beri', 'ungu', 'merah', 'abu batu'];
 
 /** Color swatches for wallets and categories (colors from theme PALETTE, all pass 4.5:1 with a white icon). */
 export function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
@@ -354,38 +354,47 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (c: 
   );
 }
 
-/** Static stand-in: shown while three.js loads, and instead of the piggy if the GPU path fails. */
-export const PiggyFallback = ({ size = 240 }: { size?: number }) => {
+type ForestProps = ComponentProps<typeof import('./Forest3D').default>;
+const LazyForest = lazy(() => import('./Forest3D'));
+
+/** Static stand-in: shown while three.js loads, and instead of the 3D scene if the GPU path fails. */
+function ForestFallback({ width, height }: { width: number; height: number }) {
   const t = useTheme();
   return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ width: size * 0.6, height: size * 0.5, borderRadius: size * 0.25, backgroundColor: t.accent }} />
+    <View style={{ width, height, alignItems: 'center', justifyContent: 'flex-end' }}>
+      <View style={{ position: 'absolute', top: height * 0.12, right: width * 0.12, width: height * 0.2, height: height * 0.2, borderRadius: height * 0.1, backgroundColor: t.accent }} />
+      <View style={{ width: width * 0.9, height: height * 0.35, borderTopLeftRadius: width * 0.45, borderTopRightRadius: width * 0.45, backgroundColor: '#3E7A57' }} />
     </View>
   );
-};
+}
 
-export class PiggyBoundary extends Component<{ children: ReactNode; size?: number }, { failed: boolean }> {
+class ForestBoundary extends Component<{ children: ReactNode; width: number; height: number }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
   }
   render() {
-    return this.state.failed ? <PiggyFallback size={this.props.size} /> : this.props.children;
+    return this.state.failed ? <ForestFallback width={this.props.width} height={this.props.height} /> : this.props.children;
   }
 }
 
-const LazyPiggy = lazy(() => import('./Piggy3D'));
+/** The squirrel-in-the-forest scene, loaded lazily so three.js never delays the first screen. */
+export function Forest(p: ForestProps & { width: number; height: number }) {
+  return (
+    <ForestBoundary width={p.width} height={p.height}>
+      <Suspense fallback={<ForestFallback width={p.width} height={p.height} />}>
+        <LazyForest {...p} />
+      </Suspense>
+    </ForestBoundary>
+  );
+}
 
 /** Empty screen with the mascot above the message, so "nothing here yet" still points to the next step. */
 export function EmptyState({ text }: { text: string }) {
   const t = useTheme();
   return (
     <View style={{ alignItems: 'center', gap: 6, paddingVertical: 8 }}>
-      <PiggyBoundary size={140}>
-        <Suspense fallback={<PiggyFallback size={140} />}>
-          <LazyPiggy size={140} />
-        </Suspense>
-      </PiggyBoundary>
+      <Forest width={200} height={150} />
       <Text style={{ color: t.muted, textAlign: 'center' }}>{text}</Text>
     </View>
   );

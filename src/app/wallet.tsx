@@ -1,11 +1,12 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, Switch, Text } from 'react-native';
+import { Switch, Text } from 'react-native';
 import { formatRupiah, parseRupiah } from '../domain';
 import { WALLET_ICON, getWallet, saveWallet } from '../db/repo';
 import type { Wallet } from '../db/schema';
 import { PALETTE, useTheme } from '../theme';
 import { Button, Chip, ColorPicker, Field, Muted, Row, Screen } from '../ui';
+import { toast } from '../feedback';
 
 const TYPES: [Wallet['type'], string][] = [
   ['cash', 'Tunai'],
@@ -27,8 +28,9 @@ export default function WalletScreen() {
     try {
       saveWallet({ id: w?.id, name, type, initialBalance: parseRupiah(initial) ?? 0, color, archived });
       router.back();
+      toast(w ? 'Dompet diperbarui' : 'Dompet ditambahkan', 'success', name.trim());
     } catch (e) {
-      Alert.alert((e as Error).message);
+      toast('Belum bisa disimpan', 'error', (e as Error).message);
     }
   };
 

@@ -1,19 +1,18 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
-import { router } from 'expo-router';
-import { lazy, Suspense, useEffect, useMemo, useRef } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
-import { FlipCard, WalletCarousel } from '../../cards';
-import { budgetStatus, formatRupiah, pace, spentByCategory, totals } from '../../domain';
-import { q } from '../../db/repo';
-import { fmtPeriod, useCategories, useCurrentPeriod, useSettings, useWallets } from '../../hooks';
+import Animated, { FadeInDown, FadeOut, ZoomIn } from 'react-native-reanimated';
+import { FlipCard, WalletStack } from '../../cards';
+import * as Haptics from 'expo-haptics';
+import { budgetStatus, formatRupiah, HIDDEN_AMOUNT, pace, spentByCategory, squirrelLines, totals } from '../../domain';
+import { q, setSetting } from '../../db/repo';
+import { fmtPeriod, useCategories, useCurrentPeriod, useReminders, useSettings, useWallets } from '../../hooks';
 import { useTheme } from '../../theme';
-import { Bar, Card, EmptyState, H, Icon, Muted, PressScale, PiggyBoundary, PiggyFallback, RollingAmount, Row, Screen, TiltCard, TxRow, levelColor } from '../../ui';
+import { Bar, Card, EmptyState, H, Icon, Muted, Forest, PressScale, RollingAmount, Row, Screen, TiltCard, TxRow, levelColor } from '../../ui';
 
-const Piggy3D = lazy(() => import('../../Piggy3D'));
-const DAY = 86_400_000;
-const PIGGY = 124;
-const amountSize = (n: number) => (formatRupiah(n).length > 13 ? 22 : formatRupiah(n).length > 10 ? 28 : 34);
+const HERO = 190;
+const amountSize = (n: number) => (formatRupiah(n).length > 13 ? 22 : formatRupiah(n).length > 10 ? 26 : 32);
 const MOOD_TEXT = { ok: 'Budget masih aman', warn: 'Budget hampir habis', over: 'Ada budget yang terlampaui' } as const;
 const endLabel = (end: Date) => new Date(end.getTime() - 1).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
 
@@ -21,8 +20,12 @@ export default function Dashboard() {
   const t = useTheme();
   const { wallets, active, balances, total } = useWallets();
   const categories = useCategories();
-  const { lastBackup } = useSettings();
   const { period } = useCurrentPeriod();
+  const { hideBalance } = useSettings();
+  const toggleHidden = () => {
+    Haptics.selectionAsync();
+    setSetting('hide_balance', hideBalance ? '0' : '1');
+  };
   const deps = [period.start.getTime()];
   const { data: flow } = useLiveQuery(q.flowTxs(period), deps);
   const { data: budgets } = useLiveQuery(q.budgets(period), deps);
@@ -38,7 +41,47 @@ export default function Dashboard() {
   }, [flow, budgets, period]);
   const speed = pace(budget.remaining, expense, period, new Date());
 
+  // Speech bubble: each tap on the squirrel shows the next line; it hides itself after a few seconds.
+  const reminderList = useReminders();
+  const today = new Date(new Date().setHours(0, 0, 0, 0));
+  const lines = squirrelLines({
+    budget,
+    perDay: speed.perDay,
+    daysLeft: speed.daysLeft,
+    spentToday: flow.filter((f) => f.type === 'expense' && f.occurredAt >= today).reduce((a, f) => a + f.amount, 0),
+    hasAnyTx: recent.length > 0,
+    reminderTitles: reminderList.map((r) => r.title),
+    hidden: hideBalance,
+  });
+  const [say, setSay] = useState<{ n: number; on: boolean }>({ n: -1, on: false });
+  // a bubble taller than two lines would touch the squirrel's ears: the forest eases down to make room
+  const sceneDrop = -1.9; // fixed: the bubble is capped at 3 lines so it never reaches the squirrel
+  // The squirrel talks on its own: a line for ~5 s, a quiet pause, then the next line. A tap skips to the next one.
+  // Runs only while Beranda is the visible tab.
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const SHOW_MS = 5000;
+  const PAUSE_MS = 3500;
+  const speak = () => {
+    clearTimeout(timer.current);
+    setSay((s) => ({ n: s.n + 1, on: true }));
+    timer.current = setTimeout(() => {
+      setSay((s) => ({ ...s, on: false }));
+      timer.current = setTimeout(speak, PAUSE_MS);
+    }, SHOW_MS);
+  };
+  useFocusEffect(
+    useCallback(() => {
+      timer.current = setTimeout(speak, 1200);
+      return () => {
+        clearTimeout(timer.current);
+        setSay((s) => ({ ...s, on: false }));
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  );
+
   // which way did the balance move? the piggy drops a coin in or takes one out
+  const [heroW, setHeroW] = useState(0);
   const prevTotal = useRef(total);
   const coin = total >= prevTotal.current ? 'in' : 'out';
   useEffect(() => {
@@ -48,41 +91,65 @@ export default function Dashboard() {
   const catMap = new Map(categories.map((c) => [c.id, c]));
   const walletMap = new Map(wallets.map((w) => [w.id, w]));
   const txCount = new Map(counts.map((c) => [c.walletId, c.n]));
-  const since = lastBackup ?? Math.min(...wallets.map((w) => w.createdAt.getTime()), Date.now());
-  const needBackup = Date.now() - since > 30 * DAY;
 
   return (
     <Screen tab>
-      {needBackup && (
-        <Pressable onPress={() => router.push('/backup')} testID="backup-reminder" accessibilityRole="button">
-          <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: t.warn }}>
-            <Icon name="backup-restore" size={26} color={t.warn} />
-            <Text style={{ color: t.text, flex: 1 }}>
-              <Text style={{ fontWeight: '700' }}>Sudah 30 hari tanpa backup.</Text> Ketuk untuk menyimpan salinan data.
-            </Text>
-          </Card>
-        </Pressable>
-      )}
 
       {/* Focal point of the app: total balance, the one figure the user opens Kas for. */}
-      <TiltCard style={{ backgroundColor: t.primary, borderRadius: 24, padding: 20 }}>
-        <Row style={{ alignItems: 'center' }}>
-          <View style={{ flex: 1, gap: 4 }}>
+      {/* The forest fills the whole card (clipped by its rounded corners); the text sits on the plain sky on the left. */}
+      <TiltCard style={{ backgroundColor: t.primary, borderRadius: 24, height: HERO, overflow: 'hidden' }}>
+        <View style={{ position: 'absolute', inset: 0 }} onLayout={(e) => setHeroW(e.nativeEvent.layout.width)}>
+          {heroW > 0 && (
+            // mascot: brows show the budget mood, an acorn drops in or out when the balance changes
+            <Forest width={heroW} height={HERO} shift={2.8} distance={6.2} drop={sceneDrop} mood={budget.limit > 0 ? budget.level : 'ok'} hopKey={total} acorn={coin} onTap={speak} />
+          )}
+        </View>
+        <View pointerEvents="box-none" style={{ padding: 20, gap: 4, width: '58%' }}>
+          <Row style={{ gap: 4 }}>
             <Text style={{ color: t.onPrimaryMuted, fontWeight: '600' }}>Total saldo</Text>
-            {/* shrink long figures instead of clipping them next to the mascot */}
+            {/* eye: hide every balance on screen, e.g. when opening Kas in public; remembered across launches */}
+            <Pressable
+              onPress={toggleHidden}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: hideBalance }}
+              accessibilityLabel={hideBalance ? 'Tampilkan saldo' : 'Sembunyikan saldo'}
+              testID="toggle-balance"
+              hitSlop={10}
+              style={({ pressed }) => ({ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: pressed ? 'rgba(255,255,255,0.15)' : 'transparent' })}
+            >
+              <Icon name={hideBalance ? 'eye-off-outline' : 'eye-outline'} size={20} color={t.onPrimaryMuted} />
+            </Pressable>
+          </Row>
+          {/* shrink long figures instead of clipping them next to the mascot */}
+          {hideBalance ? (
+            <Text testID="total-balance" numberOfLines={1} adjustsFontSizeToFit style={{ color: t.accent, fontSize: 28, fontWeight: '800' }} accessibilityLabel="Saldo disembunyikan">
+              {HIDDEN_AMOUNT}
+            </Text>
+          ) : (
             <RollingAmount value={total} testID="total-balance" style={{ color: t.accent, fontSize: amountSize(total), fontWeight: '800' }} />
-            {budget.limit > 0 && <Text style={{ color: t.onPrimary }}>{MOOD_TEXT[budget.level]}</Text>}
-          </View>
-          {/* mascot: brows show the budget mood, a coin drops in or out when the balance changes */}
-          <PiggyBoundary size={PIGGY}>
-            <Suspense fallback={<PiggyFallback size={PIGGY} />}>
-              <Piggy3D size={PIGGY} mood={budget.limit > 0 ? budget.level : 'ok'} hopKey={total} coin={coin} />
-            </Suspense>
-          </PiggyBoundary>
-        </Row>
+          )}
+          {budget.limit > 0 && <Text style={{ color: t.onPrimary }}>{MOOD_TEXT[budget.level]}</Text>}
+        </View>
+        {say.on && lines.length > 0 && (
+          <Animated.View
+            key={say.n}
+            entering={ZoomIn.duration(220)} // no spring overshoot: a bubble that grows past its size looks clipped by the card
+            exiting={FadeOut.duration(150)}
+            // above the squirrel's head (it stands at ~80% of the card width), clear of the balance text on the left
+            style={{ position: 'absolute', top: 10, right: '5%', width: '40%' }}
+          >
+            <Pressable onPress={speak} accessibilityRole="button" accessibilityLabel={`Tupai berkata: ${lines[say.n % lines.length]}. Ketuk untuk pesan berikutnya.`} accessibilityLiveRegion="polite">
+              <View style={{ backgroundColor: t.card, borderRadius: 14, paddingVertical: 7, paddingHorizontal: 10, boxShadow: '0px 4px 12px rgba(0,0,0,0.2)' }}>
+                <Text numberOfLines={3} adjustsFontSizeToFit minimumFontScale={0.8} style={{ color: t.text, fontSize: 12, lineHeight: 16 }}>{lines[say.n % lines.length]}</Text>
+              </View>
+              {/* tail pointing down to the squirrel's head */}
+              <View style={{ position: 'absolute', bottom: -5, right: '32%', width: 12, height: 12, backgroundColor: t.card, transform: [{ rotate: '45deg' }] }} />
+            </Pressable>
+          </Animated.View>
+        )}
       </TiltCard>
 
-      <WalletCarousel wallets={active} balances={balances} txCount={txCount} />
+      <WalletStack wallets={active} balances={balances} txCount={txCount} hidden={hideBalance} />
 
       {/* Spending pace: the front answers "how much may I spend today?", the back "how much do I usually spend?" */}
       <FlipCard
@@ -132,6 +199,7 @@ export default function Dashboard() {
         }
       />
 
+      <PressScale onPress={() => router.navigate('/report')} accessibilityRole="button" accessibilityLabel={`Pemasukan ${hideBalance ? 'disembunyikan' : formatRupiah(income)}, pengeluaran ${hideBalance ? 'disembunyikan' : formatRupiah(expense)}. Buka laporan.`}>
       <Card style={{ flexDirection: 'row', gap: 0, padding: 0 }}>
         {[
           { label: 'Pemasukan', value: income, color: t.income, icon: 'arrow-down-circle' as const },
@@ -146,6 +214,7 @@ export default function Dashboard() {
           </View>
         ))}
       </Card>
+      </PressScale>
 
       <PressScale onPress={() => router.navigate('/budget')} accessibilityRole="button" accessibilityLabel="Buka budget">
         <Card>
@@ -178,7 +247,7 @@ export default function Dashboard() {
               cat={catMap.get(tx.categoryId ?? '')}
               wallet={walletMap.get(tx.walletId)}
               toWallet={walletMap.get(tx.toWalletId ?? '')}
-              onPress={() => router.push({ pathname: '/tx', params: { id: tx.id } })}
+              onPress={() => router.push({ pathname: '/detail', params: { id: tx.id } })}
             />
           </Animated.View>
         ))}

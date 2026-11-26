@@ -1,13 +1,13 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
-import * as Haptics from 'expo-haptics';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
 import { crossedLevel, formatRupiah, parseRupiah, periodFor, type TxType } from '../domain';
 import { deleteTx, getTx, q, saveTx, spentInCategory } from '../db/repo';
 import { fmtDate, useCategories, useSettings, useWallets } from '../hooks';
 import { useTheme } from '../theme';
+import { confirm, toast } from '../feedback';
 import { Button, Chip, Field, Icon, ItemIcon, Muted, Row, Screen, s, type IconName } from '../ui';
 
 const TYPES: [TxType, string, IconName][] = [
@@ -51,36 +51,49 @@ export default function TxScreen() {
     try {
       saveTx({ id: existing?.id, type, amount: n, walletId: wallet, toWalletId, categoryId, occurredAt: date, note });
     } catch (e) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      return Alert.alert('Belum bisa disimpan', (e as Error).message);
+      return toast('Belum bisa disimpan', 'error', (e as Error).message);
     }
     const crossed = budget ? crossedLevel(budget.limitAmount, before, before + n) : null;
     router.back();
     if (crossed) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       const name = categories.find((c) => c.id === categoryId)?.name;
-      Alert.alert(
-        crossed === 'over' ? 'Budget terlampaui' : 'Budget hampir habis',
-        `${name}: ${formatRupiah(before + n)} dari ${formatRupiah(budget!.limitAmount)} (${Math.round(((before + n) / budget!.limitAmount) * 100)}%)`,
+      toast(
+        crossed === 'over' ? `Budget ${name} terlampaui` : `Budget ${name} hampir habis`,
+        'warn',
+        `${formatRupiah(before + n)} dari ${formatRupiah(budget!.limitAmount)} (${Math.round(((before + n) / budget!.limitAmount) * 100)}%)`,
       );
-    } else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else toast(existing ? 'Transaksi diperbarui' : 'Transaksi disimpan', 'success', `${type === 'income' ? 'Pemasukan' : type === 'expense' ? 'Pengeluaran' : 'Transfer'} ${formatRupiah(n)}`);
   };
 
-  const remove = () =>
-    Alert.alert('Hapus transaksi?', undefined, [
-      { text: 'Batal', style: 'cancel' },
-      {
-        text: 'Hapus',
-        style: 'destructive',
-        onPress: () => {
-          deleteTx(existing!.id);
-          router.back();
-        },
-      },
-    ]);
+  const remove = async () => {
+    if (!(await confirm({ title: 'Hapus transaksi?', body: `${formatRupiah(existing!.amount)} akan dihapus dari saldo dan riwayat.`, confirm: 'Hapus', destructive: true }))) return;
+    deleteTx(existing!.id);
+    router.back();
+    toast('Transaksi dihapus', 'info');
+  };
+
+  // Date shortcuts: most entries are today or yesterday, so those are one tap; anything else opens the picker.
+  const dayOf = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const today = dayOf(new Date());
+  const isToday = dayOf(date) === today;
+  const isYesterday = dayOf(date) === today - 86_400_000;
+  const setDay = (offset: number) => {
+    const d = new Date();
+    setDate(new Date(d.getFullYear(), d.getMonth(), d.getDate() - offset, date.getHours(), date.getMinutes()));
+  };
 
   return (
     <Screen>
+      {/* Save is also in the header: reachable even while the number keyboard covers the bottom of the form */}
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <Pressable onPress={save} accessibilityRole="button" testID="save-tx-header" hitSlop={8} style={({ pressed }) => ({ minHeight: 44, justifyContent: 'center', paddingHorizontal: 8, opacity: pressed ? 0.6 : 1 })}>
+              <Text style={{ color: t.mark, fontWeight: '800', fontSize: 16 }}>Simpan</Text>
+            </Pressable>
+          ),
+        }}
+      />
       <Row style={{ flexWrap: 'wrap' }}>
         {TYPES.map(([k, label, icon]) => (
           <Chip key={k} label={label} icon={icon} active={type === k} onPress={() => (setType(k), setCategoryId(null))} testID={`type-${k}`} />
@@ -98,6 +111,12 @@ export default function TxScreen() {
         style={{ fontSize: 44, fontWeight: '800', fontVariant: ['tabular-nums'], color: type === 'income' ? t.income : type === 'expense' ? t.expense : t.text, paddingVertical: 8 }}
         accessibilityLabel="Nominal"
       />
+      {/* quick amounts for the most common round figures: one tap instead of five digits */}
+      <Row style={{ flexWrap: 'wrap', gap: 6, marginTop: -4 }}>
+        {[10_000, 20_000, 50_000, 100_000].map((v) => (
+          <Chip key={v} label={`${v / 1000}rb`} active={n === v} onPress={() => setAmount(String(v))} testID={`quick-${v}`} />
+        ))}
+      </Row>
 
       <Muted>{type === 'transfer' ? 'Dari dompet' : 'Dompet'}</Muted>
       {active.length === 0 && (
@@ -141,16 +160,18 @@ export default function TxScreen() {
         </View>
       )}
 
-      <Pressable
-        onPress={() => setPicking(true)}
-        style={[s.input, s.row, { backgroundColor: t.card, borderWidth: 1, borderColor: t.line }]}
-        testID="date"
-        accessibilityRole="button"
-        accessibilityLabel={`Tanggal, ${fmtDate(date)}`}
-      >
-        <Icon name="calendar-month" color={t.muted} />
-        <Text style={{ color: t.text }}>{fmtDate(date)}</Text>
-      </Pressable>
+      <Muted>Tanggal</Muted>
+      <Row style={{ flexWrap: 'wrap', gap: 6 }}>
+        <Chip label="Hari ini" active={isToday} onPress={() => setDay(0)} testID="date-today" />
+        <Chip label="Kemarin" active={isYesterday} onPress={() => setDay(1)} testID="date-yesterday" />
+        <Chip
+          icon="calendar-month"
+          label={isToday || isYesterday ? 'Pilih tanggal' : fmtDate(date)}
+          active={!isToday && !isYesterday}
+          onPress={() => setPicking(true)}
+          testID="date"
+        />
+      </Row>
       {picking && (
         <DateTimePicker
           value={date}

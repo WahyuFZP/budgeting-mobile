@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert } from 'react-native';
+import { ActivityIndicator } from 'react-native';
 import { getAccount, lastSyncAt, signIn, signOut, syncNow, type SyncAccount } from '../db/sync';
 import { useTheme } from '../theme';
 import { Button, Card, Field, H, Muted, Row, Screen } from '../ui';
+import { confirm, toast } from '../feedback';
 
 export default function SyncScreen() {
   const t = useTheme();
@@ -26,7 +27,7 @@ export default function SyncScreen() {
     try {
       await fn();
     } catch (e) {
-      Alert.alert('Gagal', (e as Error).message);
+      toast('Gagal', 'error', (e as Error).message);
     } finally {
       setBusy(false);
       refresh();
@@ -36,7 +37,7 @@ export default function SyncScreen() {
   const sync = () =>
     run(async () => {
       const r = await syncNow();
-      Alert.alert('Sync selesai', `${r.sent} perubahan dikirim, ${r.received} diterima.`);
+      toast('Sync selesai', 'success', `${r.sent} perubahan dikirim, ${r.received} diterima.`);
     });
 
   const login = (mode: 'login' | 'register') =>
@@ -46,11 +47,9 @@ export default function SyncScreen() {
       await syncNow();
     });
 
-  const logout = () =>
-    Alert.alert('Keluar dari akun sync?', 'Data di HP ini tetap ada.', [
-      { text: 'Batal', style: 'cancel' },
-      { text: 'Keluar', style: 'destructive', onPress: () => run(signOut) },
-    ]);
+  const logout = async () => {
+    if (await confirm({ title: 'Keluar dari akun sync?', body: 'Data di HP ini tetap ada.', confirm: 'Keluar', destructive: true, icon: 'logout' })) run(signOut);
+  };
 
   return (
     <Screen>

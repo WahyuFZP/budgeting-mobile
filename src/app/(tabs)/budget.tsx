@@ -1,13 +1,14 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { budgetStatus, formatRupiah, nextPeriod, pace, parseRupiah, periodFor, prevPeriod, spentByCategory, totals } from '../../domain';
 import { copyBudgets, q, setBudget } from '../../db/repo';
 import { fmtPeriod, useCategories, useSettings } from '../../hooks';
 import { useTheme } from '../../theme';
 import { Bar, Button, Card, H, Icon, ItemIcon, Muted, PressScale, Row, Screen, levelColor } from '../../ui';
+import { toast } from '../../feedback';
 
 // Status in words too, so it never depends on seeing the bar color.
 const LEVEL_TEXT = { ok: 'Aman', warn: 'Hampir habis', over: 'Terlampaui' } as const;
@@ -42,10 +43,11 @@ export default function BudgetScreen() {
   const saveAll = () => {
     for (const c of categories) setBudget(c.id, period, parseRupiah(draft[c.id] ?? '') ?? 0);
     setEditing(false);
+    toast('Budget disimpan', 'success', `Total ${formatRupiah(draftTotal)} untuk ${fmtPeriod(period)}`);
   };
   const copyLast = () => {
     const n = copyBudgets(prevPeriod(period, payday), period);
-    Alert.alert(n ? `${n} budget disalin dari periode lalu` : 'Tidak ada budget baru untuk disalin');
+    toast(n ? `${n} budget disalin dari periode lalu` : 'Tidak ada budget baru untuk disalin', n ? 'success' : 'info');
   };
 
   return (

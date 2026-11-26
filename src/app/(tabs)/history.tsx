@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
+import { formatRupiah } from '../../domain';
 import { q, type HistoryFilter } from '../../db/repo';
 import type { Transaction } from '../../db/schema';
 import { fmtDate, useCategories, useWallets } from '../../hooks';
@@ -12,7 +13,8 @@ import { Chip, EmptyState, Field, Muted, Row, TxRow, s, useNavScroll, useTabBarS
 
 const LIMIT = 500; // shortcut: newest 500 matches, no paging; switch to FlashList + paging for 20k-row profiling
 
-type Item = { header: string } | Transaction;
+type Header = { header: string; out: number; in: number };
+type Item = Header | Transaction;
 
 export default function History() {
   const t = useTheme();
@@ -40,10 +42,13 @@ export default function History() {
 
   // group by day: insert a header row whenever the date changes
   const items: Item[] = [];
-  let last = '';
+  let head = null as Header | null;
   for (const t of data) {
     const day = fmtDate(t.occurredAt);
-    if (day !== last) items.push({ header: (last = day) });
+    if (day !== head?.header) items.push((head = { header: day, out: 0, in: 0 }));
+    // the day's totals ride on its header; transfers move money between wallets, so they count as neither
+    if (t.type === 'expense') head.out += t.amount;
+    if (t.type === 'income') head.in += t.amount;
     items.push(t);
   }
 
@@ -104,14 +109,20 @@ export default function History() {
         ListFooterComponent={data.length === LIMIT ? <Muted>Menampilkan {LIMIT} terbaru. Persempit filter untuk melihat yang lebih lama.</Muted> : undefined}
         renderItem={({ item }) =>
           'header' in item ? (
-            <Text style={[s.label, { marginTop: 12, color: t.muted }]}>{item.header}</Text>
+            <Row style={{ marginTop: 14, justifyContent: 'space-between', gap: 8 }}>
+              <Text style={[s.label, { color: t.muted }]}>{item.header}</Text>
+              <Row style={{ gap: 10 }}>
+                {item.in > 0 && <Text style={{ color: t.income, fontWeight: '600', fontVariant: ['tabular-nums'] }}>+{formatRupiah(item.in)}</Text>}
+                {item.out > 0 && <Text style={{ color: t.expense, fontWeight: '600', fontVariant: ['tabular-nums'] }}>-{formatRupiah(item.out)}</Text>}
+              </Row>
+            </Row>
           ) : (
             <TxRow
               t={item}
               cat={catMap.get(item.categoryId ?? '')}
               wallet={walletMap.get(item.walletId)}
               toWallet={walletMap.get(item.toWalletId ?? '')}
-              onPress={() => router.push({ pathname: '/tx', params: { id: item.id } })}
+              onPress={() => router.push({ pathname: '/detail', params: { id: item.id } })}
             />
           )
         }
