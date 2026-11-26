@@ -1,4 +1,8 @@
 import {
+  billState,
+  firstDue,
+  goalProgress,
+  nextMonthly,
   budgetStatus,
   crossedLevel,
   pace,
@@ -184,5 +188,47 @@ describe('squirrelLines', () => {
   });
   test('never reveals amounts while balances are hidden', () => {
     expect(squirrelLines({ ...base, hidden: true }).join(' ')).not.toMatch(/Rp\d/);
+  });
+});
+
+describe('bills', () => {
+  test('next month keeps the due day, clamped to short months and restored after', () => {
+    expect(nextMonthly(d(2026, 1, 31, 0), 31)).toEqual(d(2026, 2, 28, 0));
+    expect(nextMonthly(d(2026, 2, 28, 0), 31)).toEqual(d(2026, 3, 31, 0));
+    expect(nextMonthly(d(2026, 12, 5, 0), 5)).toEqual(d(2027, 1, 5, 0));
+  });
+  test('first due date is this month while the day is still ahead or today, else next month', () => {
+    expect(firstDue(d(2026, 11, 26), 28)).toEqual(d(2026, 11, 28, 0));
+    expect(firstDue(d(2026, 11, 26), 26)).toEqual(d(2026, 11, 26, 0));
+    expect(firstDue(d(2026, 11, 26), 5)).toEqual(d(2026, 12, 5, 0));
+  });
+  test('state by whole days, whatever the time of day', () => {
+    const now = d(2026, 11, 26, 23);
+    expect(billState(d(2026, 11, 24, 0), now)).toEqual({ state: 'late', days: -2 });
+    expect(billState(d(2026, 11, 26, 0), now)).toEqual({ state: 'today', days: 0 });
+    expect(billState(d(2026, 11, 29, 0), now)).toEqual({ state: 'soon', days: 3 });
+    expect(billState(d(2026, 11, 30, 0), now).state).toBe('later');
+  });
+  test('due and late bills lead the reminders; later ones stay quiet', () => {
+    const now = d(2026, 11, 26);
+    const r = reminders({ now, lastBackup: now.getTime(), firstUse: now.getTime(), budgets: [{ name: 'Makan', limit: 100, spent: 200 }], hasAnyTx: true, hasTxToday: true,
+      bills: [{ name: 'Kos', amount: 1_500_000, due: d(2026, 11, 26, 0) }, { name: 'Wifi', amount: 300_000, due: d(2026, 12, 20, 0) }] });
+    expect(r.map((x) => x.title)).toEqual(['Kos jatuh tempo hari ini', 'Budget Makan terlampaui']);
+    expect(r[0].href).toBe('/recurring');
+  });
+});
+
+describe('goalProgress', () => {
+  const now = d(2026, 11, 26);
+  test('percent and remaining, capped at the target', () => {
+    expect(goalProgress(1_250_000, 5_000_000, null, now)).toMatchObject({ pct: 25, remaining: 3_750_000, done: false, perMonth: null });
+    expect(goalProgress(6_000_000, 5_000_000, null, now)).toMatchObject({ pct: 100, remaining: 0, done: true });
+  });
+  test('per month counts the current month and rounds up so following it reaches the target', () => {
+    // Nov, Dec, Jan, Feb = 4 months for 1.000.001 -> 250.001
+    expect(goalProgress(0, 1_000_001, d(2027, 2, 10), now)).toMatchObject({ monthsLeft: 4, perMonth: 250_001 });
+  });
+  test('a passed target date asks for the whole remainder now', () => {
+    expect(goalProgress(400_000, 1_000_000, d(2026, 6, 1), now)).toMatchObject({ monthsLeft: 1, perMonth: 600_000 });
   });
 });

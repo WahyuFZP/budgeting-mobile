@@ -47,6 +47,8 @@ export const wallets = pgTable(
     initialBalance: rupiah('initial_balance').notNull(),
     sortOrder: integer('sort_order').notNull().default(0),
     archived: boolean('archived').notNull().default(false),
+    targetAmount: rupiah('target_amount'),
+    targetDate: ts('target_date'),
   },
   (t) => [primaryKey({ columns: [t.userId, t.id] }), bySeq('wallets_seq_idx', t), check('wallet_type', sql`${t.type} in ('cash','bank','ewallet')`)],
 );
@@ -71,7 +73,7 @@ export const recurringRules = pgTable(
   {
     ...owned(),
     template: text('template').notNull(), // JSON, same as the app
-    frequency: text('frequency', { enum: ['daily', 'weekly', 'monthly', 'yearly'] }).notNull(),
+    frequency: text('frequency', { enum: ['none', 'daily', 'weekly', 'monthly', 'yearly'] }).notNull(),
     interval: integer('interval').notNull().default(1),
     nextRunAt: ts('next_run_at').notNull(),
     endAt: ts('end_at'),

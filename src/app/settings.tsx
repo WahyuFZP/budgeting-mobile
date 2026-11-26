@@ -110,6 +110,12 @@ export default function SettingsScreen() {
       </Card>
 
       <Card>
+        <H>Tagihan & template</H>
+        <Muted>Tagihan bulanan diingatkan menjelang jatuh tempo. Template mencatat transaksi rutin dengan satu ketukan.</Muted>
+        <Button kind="ghost" icon="calendar-sync" title="Atur tagihan & template" onPress={() => router.push('/recurring')} testID="open-recurring" />
+      </Card>
+
+      <Card>
         <H>Keamanan</H>
         {bioOk ? (
           <Row style={{ justifyContent: 'space-between', minHeight: 44 }}>

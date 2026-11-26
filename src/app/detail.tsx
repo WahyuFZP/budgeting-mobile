@@ -5,11 +5,11 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { formatRupiah } from '../domain';
-import { deleteTx, q } from '../db/repo';
+import { deleteTx, q, restoreTx } from '../db/repo';
 import { useCategories, useWallets } from '../hooks';
 import { useTheme } from '../theme';
 import { Button, Icon, ItemIcon, Muted, Row, Screen } from '../ui';
-import { confirm, toast } from '../feedback';
+import { toast } from '../feedback';
 
 const TYPE = { income: 'Pemasukan', expense: 'Pengeluaran', transfer: 'Transfer' } as const;
 const NOTCH = 22;
@@ -39,12 +39,11 @@ export default function DetailScreen() {
   const day = tx.occurredAt.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const time = tx.occurredAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
-  const remove = async () => {
-    const ok = await confirm({ title: 'Hapus transaksi?', body: `${TYPE[tx.type]} ${formatRupiah(tx.amount)} akan dihapus dari saldo dan riwayat.`, confirm: 'Hapus', destructive: true });
-    if (!ok) return;
+  // no confirm dialog: deletion is soft, so the toast offers a 5 s undo instead
+  const remove = () => {
     deleteTx(tx.id);
     router.back();
-    toast('Transaksi dihapus', 'info');
+    toast('Transaksi dihapus', 'info', `${TYPE[tx.type]} ${formatRupiah(tx.amount)}`, { label: 'Urungkan', onPress: () => (restoreTx(tx.id), toast('Transaksi dikembalikan')) });
   };
 
   const facts: [string, string][] = [

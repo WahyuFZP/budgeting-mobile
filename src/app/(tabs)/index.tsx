@@ -1,13 +1,13 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import Animated, { FadeInDown, FadeOut, ZoomIn } from 'react-native-reanimated';
 import { FlipCard, WalletStack } from '../../cards';
 import * as Haptics from 'expo-haptics';
-import { budgetStatus, formatRupiah, HIDDEN_AMOUNT, pace, spentByCategory, squirrelLines, totals } from '../../domain';
+import { billState, budgetStatus, formatRupiah, HIDDEN_AMOUNT, pace, spentByCategory, squirrelLines, totals } from '../../domain';
 import { q, setSetting } from '../../db/repo';
-import { fmtPeriod, useCategories, useCurrentPeriod, useReminders, useSettings, useWallets } from '../../hooks';
+import { fmtPeriod, recordRule, useCategories, useCurrentPeriod, useReminders, useRules, useSettings, useWallets } from '../../hooks';
 import { useTheme } from '../../theme';
 import { Bar, Card, EmptyState, H, Icon, Muted, Forest, PressScale, RollingAmount, Row, Screen, TiltCard, TxRow, levelColor } from '../../ui';
 
@@ -22,6 +22,7 @@ export default function Dashboard() {
   const categories = useCategories();
   const { period } = useCurrentPeriod();
   const { hideBalance } = useSettings();
+  const rp = (n: number) => (hideBalance ? HIDDEN_AMOUNT : formatRupiah(n)); // eye toggle masks every amount on Beranda, not only the balance
   const toggleHidden = () => {
     Haptics.selectionAsync();
     setSetting('hide_balance', hideBalance ? '0' : '1');
@@ -43,6 +44,8 @@ export default function Dashboard() {
 
   // Speech bubble: each tap on the squirrel shows the next line; it hides itself after a few seconds.
   const reminderList = useReminders();
+  const { bills, templates } = useRules();
+  const dueBills = bills.map((b) => ({ ...b, ...billState(b.rule.nextRunAt, new Date()) })).filter((b) => b.state !== 'later');
   const today = new Date(new Date().setHours(0, 0, 0, 0));
   const lines = squirrelLines({
     budget,
@@ -54,7 +57,6 @@ export default function Dashboard() {
     hidden: hideBalance,
   });
   const [say, setSay] = useState<{ n: number; on: boolean }>({ n: -1, on: false });
-  // a bubble taller than two lines would touch the squirrel's ears: the forest eases down to make room
   const sceneDrop = -1.9; // fixed: the bubble is capped at 3 lines so it never reaches the squirrel
   // The squirrel talks on its own: a line for ~5 s, a quiet pause, then the next line. A tap skips to the next one.
   // Runs only while Beranda is the visible tab.
@@ -149,56 +151,6 @@ export default function Dashboard() {
         )}
       </TiltCard>
 
-      <WalletStack wallets={active} balances={balances} txCount={txCount} hidden={hideBalance} />
-
-      {/* Spending pace: the front answers "how much may I spend today?", the back "how much do I usually spend?" */}
-      <FlipCard
-        label={
-          budget.limit > 0
-            ? [`Jatah harian ${formatRupiah(speed.perDay)} sampai ${endLabel(period.end)}`, `Rata-rata pengeluaran ${formatRupiah(speed.avgPerDay)} per hari`]
-            : [`Rata-rata pengeluaran ${formatRupiah(speed.avgPerDay)} per hari`, 'Atur budget untuk melihat jatah harian']
-        }
-        front={
-          budget.limit > 0 ? (
-            <>
-              <Row style={{ justifyContent: 'space-between' }}>
-                <Muted>Jatah harian sampai {endLabel(period.end)}</Muted>
-                <Icon name="rotate-3d-variant" size={20} color={t.muted} />
-              </Row>
-              <Text style={{ color: levelColor(budget.level, t), fontSize: 26, fontWeight: '800', fontVariant: ['tabular-nums'] }} testID="per-day">
-                {formatRupiah(speed.perDay)}
-              </Text>
-              <Muted>
-                {speed.perDay > 0 ? `${speed.daysLeft} hari lagi, dari sisa ${formatRupiah(budget.remaining)}` : 'Budget periode ini sudah habis'}
-              </Muted>
-            </>
-          ) : (
-            <>
-              <Row style={{ justifyContent: 'space-between' }}>
-                <Muted>Rata-rata pengeluaran per hari</Muted>
-                <Icon name="rotate-3d-variant" size={20} color={t.muted} />
-              </Row>
-              <Text style={{ color: t.text, fontSize: 26, fontWeight: '800', fontVariant: ['tabular-nums'] }}>{formatRupiah(speed.avgPerDay)}</Text>
-              <Muted>Periode {fmtPeriod(period)}</Muted>
-            </>
-          )
-        }
-        back={
-          budget.limit > 0 ? (
-            <>
-              <Muted>Rata-rata pengeluaran per hari sejauh ini</Muted>
-              <Text style={{ color: t.text, fontSize: 26, fontWeight: '800', fontVariant: ['tabular-nums'] }}>{formatRupiah(speed.avgPerDay)}</Text>
-              <Muted>{speed.avgPerDay > speed.perDay ? 'Lebih besar dari jatah harian: kurangi sedikit tiap hari.' : 'Masih di bawah jatah harian.'}</Muted>
-            </>
-          ) : (
-            <>
-              <Muted>Jatah harian</Muted>
-              <Text style={{ color: t.text, fontWeight: '700' }}>Atur batas per kategori di tab Budget, lalu Kas menghitung berapa yang aman dibelanjakan tiap hari.</Text>
-            </>
-          )
-        }
-      />
-
       <PressScale onPress={() => router.navigate('/report')} accessibilityRole="button" accessibilityLabel={`Pemasukan ${hideBalance ? 'disembunyikan' : formatRupiah(income)}, pengeluaran ${hideBalance ? 'disembunyikan' : formatRupiah(expense)}. Buka laporan.`}>
       <Card style={{ flexDirection: 'row', gap: 0, padding: 0 }}>
         {[
@@ -210,11 +162,82 @@ export default function Dashboard() {
               <Icon name={x.icon} size={18} color={x.color} />
               <Muted>{x.label}</Muted>
             </Row>
-            <RollingAmount value={x.value} testID={i ? 'period-expense' : 'period-income'} style={{ fontWeight: '800', fontSize: 18, color: x.color }} />
+            <RollingAmount value={x.value} hidden={hideBalance} testID={i ? 'period-expense' : 'period-income'} style={{ fontWeight: '800', fontSize: 18, color: x.color }} />
           </View>
         ))}
       </Card>
       </PressScale>
+
+      {/* bills due within 3 days (or late): the one thing on Beranda that needs an action today */}
+      {dueBills.length > 0 && (
+        <Card style={{ gap: 4 }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <H>Tagihan jatuh tempo</H>
+            <Pressable onPress={() => router.navigate('/recurring')} accessibilityRole="button" hitSlop={10} style={{ minHeight: 36, justifyContent: 'center' }}>
+              <Text style={{ color: t.mark, fontWeight: '600' }}>Semua</Text>
+            </Pressable>
+          </Row>
+          {dueBills.map((b) => (
+            <Row key={b.rule.id} style={{ gap: 12, minHeight: 52 }}>
+              <Icon name="calendar-alert" size={24} color={b.state === 'late' ? t.expense : t.warn} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.text, fontWeight: '700' }} numberOfLines={1}>
+                  {b.tpl.name}
+                </Text>
+                <Text style={{ color: b.state === 'late' ? t.expense : t.warn, fontWeight: '600' }} numberOfLines={1}>
+                  {rp(b.tpl.amount)} · {b.state === 'late' ? `terlambat ${-b.days} hari` : b.state === 'today' ? 'hari ini' : `${b.days} hari lagi`}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => recordRule(b.rule, 'Tagihan dicatat lunas')}
+                accessibilityRole="button"
+                accessibilityLabel={`Tandai lunas: ${b.tpl.name}`}
+                testID={`home-pay-${b.rule.id}`}
+                style={({ pressed }) => ({ minHeight: 44, paddingHorizontal: 16, borderRadius: 12, justifyContent: 'center', backgroundColor: t.primary, opacity: pressed ? 0.8 : 1 })}
+              >
+                <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Lunas</Text>
+              </Pressable>
+            </Row>
+          ))}
+        </Card>
+      )}
+
+      {/* one-tap templates; the last chip makes a new one, so the feature is findable before it is used */}
+      <View style={{ gap: 8 }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <Text style={{ color: t.text, fontWeight: '700', fontSize: 16 }}>Catat cepat</Text>
+          <Pressable onPress={() => router.navigate('/recurring')} accessibilityRole="button" hitSlop={10} testID="manage-rules" style={{ minHeight: 36, justifyContent: 'center' }}>
+            <Text style={{ color: t.mark, fontWeight: '600' }}>Tagihan & template</Text>
+          </Pressable>
+        </Row>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
+          {templates.map((x) => (
+            <PressScale
+              key={x.rule.id}
+              onPress={() => recordRule(x.rule, 'Transaksi dicatat')}
+              accessibilityRole="button"
+              accessibilityLabel={`Catat ${x.tpl.name}${hideBalance ? '' : `, ${formatRupiah(x.tpl.amount)}`}`}
+              testID={`quick-tpl-${x.rule.id}`}
+              style={{ minHeight: 56, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 14, backgroundColor: t.card, borderWidth: 1, borderColor: t.line, justifyContent: 'center' }}
+            >
+              <Text style={{ color: t.text, fontWeight: '700' }} numberOfLines={1}>
+                {x.tpl.name}
+              </Text>
+              <Text style={{ color: x.tpl.type === 'income' ? t.income : x.tpl.type === 'expense' ? t.expense : t.muted, fontVariant: ['tabular-nums'] }}>{rp(x.tpl.amount)}</Text>
+            </PressScale>
+          ))}
+          <PressScale
+            onPress={() => router.push({ pathname: '/rule', params: { kind: 'template' } })}
+            accessibilityRole="button"
+            accessibilityLabel="Buat template baru"
+            testID="quick-tpl-new"
+            style={{ minHeight: 56, paddingHorizontal: 14, borderRadius: 14, borderWidth: 2, borderStyle: 'dashed', borderColor: t.line, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+          >
+            <Icon name="plus" size={20} color={t.mark} />
+            <Text style={{ color: t.text, fontWeight: '600' }}>{templates.length ? 'Baru' : 'Buat template, mis. kopi pagi'}</Text>
+          </PressScale>
+        </ScrollView>
+      </View>
 
       <PressScale onPress={() => router.navigate('/budget')} accessibilityRole="button" accessibilityLabel="Buka budget">
         <Card>
@@ -224,10 +247,10 @@ export default function Dashboard() {
           </Row>
           {budget.limit > 0 ? (
             <>
-              <RollingAmount value={budget.remaining} testID="budget-remaining" style={{ fontWeight: '800', fontSize: 22, color: levelColor(budget.level, t) }} />
+              <RollingAmount value={budget.remaining} hidden={hideBalance} testID="budget-remaining" style={{ fontWeight: '800', fontSize: 22, color: levelColor(budget.level, t) }} />
               <Bar pct={budget.pct} color={levelColor(budget.level, t)} />
               <Muted>
-                {Math.round(budget.pct)}% dari {formatRupiah(budget.limit)} terpakai
+                {Math.round(budget.pct)}% dari {rp(budget.limit)} terpakai
               </Muted>
             </>
           ) : (
@@ -235,6 +258,56 @@ export default function Dashboard() {
           )}
         </Card>
       </PressScale>
+
+      {/* Spending pace: the front answers "how much may I spend today?", the back "how much do I usually spend?" */}
+      <FlipCard
+        label={
+          budget.limit > 0
+            ? [`Jatah harian ${rp(speed.perDay)} sampai ${endLabel(period.end)}`, `Rata-rata pengeluaran ${rp(speed.avgPerDay)} per hari`]
+            : [`Rata-rata pengeluaran ${rp(speed.avgPerDay)} per hari`, 'Atur budget untuk melihat jatah harian']
+        }
+        front={
+          budget.limit > 0 ? (
+            <>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Muted>Jatah harian sampai {endLabel(period.end)}</Muted>
+                <Icon name="rotate-3d-variant" size={20} color={t.muted} />
+              </Row>
+              <Text style={{ color: levelColor(budget.level, t), fontSize: 26, fontWeight: '800', fontVariant: ['tabular-nums'] }} testID="per-day">
+                {rp(speed.perDay)}
+              </Text>
+              <Muted>
+                {speed.perDay > 0 ? `${speed.daysLeft} hari lagi, dari sisa ${rp(budget.remaining)}` : 'Budget periode ini sudah habis'}
+              </Muted>
+            </>
+          ) : (
+            <>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Muted>Rata-rata pengeluaran per hari</Muted>
+                <Icon name="rotate-3d-variant" size={20} color={t.muted} />
+              </Row>
+              <Text style={{ color: t.text, fontSize: 26, fontWeight: '800', fontVariant: ['tabular-nums'] }}>{rp(speed.avgPerDay)}</Text>
+              <Muted>Periode {fmtPeriod(period)}</Muted>
+            </>
+          )
+        }
+        back={
+          budget.limit > 0 ? (
+            <>
+              <Muted>Rata-rata pengeluaran per hari sejauh ini</Muted>
+              <Text style={{ color: t.text, fontSize: 26, fontWeight: '800', fontVariant: ['tabular-nums'] }}>{rp(speed.avgPerDay)}</Text>
+              <Muted>{speed.avgPerDay > speed.perDay ? 'Lebih besar dari jatah harian: kurangi sedikit tiap hari.' : 'Masih di bawah jatah harian.'}</Muted>
+            </>
+          ) : (
+            <>
+              <Muted>Jatah harian</Muted>
+              <Text style={{ color: t.text, fontWeight: '700' }}>Atur batas per kategori di tab Budget, lalu Kas menghitung berapa yang aman dibelanjakan tiap hari.</Text>
+            </>
+          )
+        }
+      />
+
+      <WalletStack wallets={active} balances={balances} txCount={txCount} hidden={hideBalance} />
 
       <Card>
         <H>Transaksi terakhir</H>
@@ -247,6 +320,7 @@ export default function Dashboard() {
               cat={catMap.get(tx.categoryId ?? '')}
               wallet={walletMap.get(tx.walletId)}
               toWallet={walletMap.get(tx.toWalletId ?? '')}
+              hidden={hideBalance}
               onPress={() => router.push({ pathname: '/detail', params: { id: tx.id } })}
             />
           </Animated.View>

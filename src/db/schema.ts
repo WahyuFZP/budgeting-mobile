@@ -17,6 +17,9 @@ export const wallets = sqliteTable('wallets', {
   initialBalance: integer('initial_balance').notNull(), // Rupiah; balance itself is derived, never stored
   sortOrder: integer('sort_order').notNull().default(0),
   archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
+  // savings goal: a wallet with a target works like a bank "pocket"; progress is its derived balance
+  targetAmount: integer('target_amount'),
+  targetDate: integer('target_date', { mode: 'timestamp_ms' }),
 });
 
 export const categories = sqliteTable('categories', {
@@ -62,11 +65,11 @@ export const budgets = sqliteTable(
   (t) => [index('budget_period_idx').on(t.periodStart)],
 );
 
-// v1.1 (transaksi berulang); table exists now so v1.1 needs no migration of core tables.
+// Monthly bills (frequency 'monthly', next_run_at = next due date) and one-tap templates (frequency 'none').
 export const recurringRules = sqliteTable('recurring_rules', {
   ...meta,
-  template: text('template').notNull(), // JSON
-  frequency: text('frequency', { enum: ['daily', 'weekly', 'monthly', 'yearly'] }).notNull(),
+  template: text('template').notNull(), // JSON RuleTemplate (domain)
+  frequency: text('frequency', { enum: ['none', 'daily', 'weekly', 'monthly', 'yearly'] }).notNull(),
   interval: integer('interval').notNull().default(1),
   nextRunAt: integer('next_run_at', { mode: 'timestamp_ms' }).notNull(),
   endAt: integer('end_at', { mode: 'timestamp_ms' }),
