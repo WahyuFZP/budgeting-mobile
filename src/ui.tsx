@@ -14,7 +14,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Category, Transaction, Wallet } from './db/schema';
-import { formatRupiah, type BudgetLevel } from './domain';
+import { formatRupiah, HIDDEN_AMOUNT, type BudgetLevel } from './domain';
 import { PALETTE, useTheme, type Palette } from './theme';
 
 export type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -186,13 +186,14 @@ export function Bar({ pct, color }: { pct: number; color: string }) {
 const AnimatedInput = Animated.createAnimatedComponent(TextInput);
 
 /** Money figure that rolls to its new value, so the user sees a balance change instead of a jump. */
-export function RollingAmount({ value, style, testID }: { value: number; style?: object; testID?: string }) {
+export function RollingAmount({ value, style, testID, hidden }: { value: number; style?: object; testID?: string; hidden?: boolean }) {
   const reduced = useReducedMotion();
   const v = useSharedValue(value);
   useEffect(() => {
     v.value = reduced ? value : withTiming(value, { duration: 600 });
   }, [value, reduced, v]);
   const props = useAnimatedProps(() => ({ text: formatRupiah(Math.round(v.value)), defaultValue: formatRupiah(Math.round(v.value)) }) as object);
+  if (hidden) return <Text testID={testID} accessibilityLabel="Nominal disembunyikan" numberOfLines={1} style={[{ fontVariant: ['tabular-nums'] }, style]}>{HIDDEN_AMOUNT}</Text>;
   return (
     <AnimatedInput
       testID={testID}
@@ -235,7 +236,8 @@ export function TiltCard({ children, style }: { children: ReactNode; style?: Vie
 }
 
 /** 6-digit PIN pad used by onboarding, lock screen and PIN change. */
-export function PinPad({ title, error, onComplete }: { title: string; error?: string; onComplete: (pin: string) => void }) {
+/** 6-digit pad. `onBio` puts a fingerprint key in the empty bottom-left slot, where banking apps keep it. */
+export function PinPad({ title, error, onComplete, onBio }: { title: string; error?: string; onComplete: (pin: string) => void; onBio?: () => void }) {
   const t = useTheme();
   const [pin, setPin] = useState('');
   const press = (k: string) => {
@@ -259,17 +261,17 @@ export function PinPad({ title, error, onComplete }: { title: string; error?: st
         {error ?? ''}
       </Text>
       <View style={{ width: 270, flexDirection: 'row', flexWrap: 'wrap', gap: 15 }}>
-        {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'].map((k, i) =>
+        {['1', '2', '3', '4', '5', '6', '7', '8', '9', onBio ? 'bio' : '', '0', 'del'].map((k, i) =>
           k ? (
             <Pressable
               key={i}
               testID={`pin-${k}`}
               accessibilityRole="button"
-              accessibilityLabel={k === 'del' ? 'Hapus angka' : k}
-              onPress={() => press(k)}
+              accessibilityLabel={k === 'del' ? 'Hapus angka' : k === 'bio' ? 'Buka dengan sidik jari atau wajah' : k}
+              onPress={() => (k === 'bio' ? onBio!() : press(k))}
               style={({ pressed }) => [s.key, { backgroundColor: pressed ? t.line : t.card }]}
             >
-              {k === 'del' ? <Icon name="backspace-outline" size={26} color={t.text} /> : <Text style={{ fontSize: 26, fontWeight: '600', color: t.text }}>{k}</Text>}
+              {k === 'bio' ? <Icon name="fingerprint" size={30} color={t.mark} /> : k === 'del' ? <Icon name="backspace-outline" size={26} color={t.text} /> : <Text style={{ fontSize: 26, fontWeight: '600', color: t.text }}>{k}</Text>}
             </Pressable>
           ) : (
             <View key={i} style={{ width: 80, height: 64 }} />
@@ -281,17 +283,18 @@ export function PinPad({ title, error, onComplete }: { title: string; error?: st
 }
 
 /** One transaction line; tap opens it for edit. */
-export function TxRow({ t: tx, cat, wallet, toWallet, onPress }: { t: Transaction; cat?: Category; wallet?: Wallet; toWallet?: Wallet; onPress: () => void }) {
+export function TxRow({ t: tx, cat, wallet, toWallet, onPress, hidden }: { t: Transaction; cat?: Category; wallet?: Wallet; toWallet?: Wallet; onPress: () => void; hidden?: boolean }) {
   const t = useTheme();
   const transfer = tx.type === 'transfer';
   const sign = tx.type === 'income' ? '+' : tx.type === 'expense' ? '-' : '';
+  const amount = hidden ? HIDDEN_AMOUNT : `${sign}${formatRupiah(tx.amount)}`;
   const title = transfer ? `Transfer ke ${toWallet?.name ?? '?'}` : (cat?.name ?? 'Tanpa kategori');
   return (
     <Pressable
       onPress={onPress}
       testID={`tx-${tx.id}`}
       accessibilityRole="button"
-      accessibilityLabel={`${title}, ${sign}${formatRupiah(tx.amount)}`}
+      accessibilityLabel={`${title}, ${hidden ? 'nominal disembunyikan' : amount}`}
       style={({ pressed }) => [s.row, { paddingVertical: 10, gap: 12 }, pressed && { opacity: 0.6 }]}
     >
       <ItemIcon icon={transfer ? 'swap-horizontal' : (cat?.icon ?? 'tag')} color={transfer ? t.muted : (cat?.color ?? t.muted)} />
@@ -305,8 +308,7 @@ export function TxRow({ t: tx, cat, wallet, toWallet, onPress }: { t: Transactio
         </Text>
       </View>
       <Text style={{ fontWeight: '700', fontVariant: ['tabular-nums'], color: tx.type === 'income' ? t.income : tx.type === 'expense' ? t.expense : t.text }}>
-        {sign}
-        {formatRupiah(tx.amount)}
+        {amount}
       </Text>
     </Pressable>
   );

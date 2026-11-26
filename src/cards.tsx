@@ -6,7 +6,7 @@ import { useState, type ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
 import type { Wallet } from './db/schema';
-import { formatRupiah, HIDDEN_AMOUNT } from './domain';
+import { formatRupiah, goalProgress, HIDDEN_AMOUNT } from './domain';
 import { useTheme } from './theme';
 import { Icon, ItemIcon, PressScale, Row } from './ui';
 
@@ -72,11 +72,11 @@ export function WalletStack({ wallets, balances, txCount, hidden }: { wallets: W
                 <Text style={{ color: '#FFFFFF', fontWeight: '700', fontVariant: ['tabular-nums'] }}>{money(w.id)}</Text>
               </Row>
               <View>
-                <Text style={{ color: '#FFFFFF', opacity: 0.85 }}>{TYPE_LABEL[w.type]}</Text>
+                <Text style={{ color: '#FFFFFF', opacity: 0.85 }}>{w.targetAmount ? `Target ${hidden ? HIDDEN_AMOUNT : formatRupiah(w.targetAmount)}` : TYPE_LABEL[w.type]}</Text>
                 <Text style={{ color: '#FFFFFF', fontSize: 24, fontWeight: '800', fontVariant: ['tabular-nums'] }} numberOfLines={1} adjustsFontSizeToFit>
                   {money(w.id)}
                 </Text>
-                <Text style={{ color: '#FFFFFF', opacity: 0.85 }}>{txCount.get(w.id) ?? 0} transaksi periode ini</Text>
+                {w.targetAmount ? <GoalLine w={w} balance={balances.get(w.id) ?? 0} hidden={hidden} /> : <Text style={{ color: '#FFFFFF', opacity: 0.85 }}>{txCount.get(w.id) ?? 0} transaksi periode ini</Text>}
               </View>
             </PressScale>
           </StackCard>
@@ -123,5 +123,21 @@ export function FlipCard({ front, back, label, height = 150 }: { front: ReactNod
       <Animated.View style={[faceBase, frontStyle]}>{front}</Animated.View>
       <Animated.View style={[faceBase, backStyle]}>{back}</Animated.View>
     </PressScale>
+  );
+}
+
+/** Savings-goal progress on a wallet card: white bar on the wallet's own color, then what is left (and per month). */
+function GoalLine({ w, balance, hidden }: { w: Wallet; balance: number; hidden: boolean }) {
+  const g = goalProgress(balance, w.targetAmount!, w.targetDate, new Date());
+  const rest = g.done ? 'Target tercapai!' : hidden ? `${Math.floor(g.pct)}% tercapai` : `Kurang ${formatRupiah(g.remaining)}${g.perMonth ? `, ${formatRupiah(g.perMonth)}/bulan` : ''}`;
+  return (
+    <View style={{ gap: 4, marginTop: 2 }} accessible accessibilityLabel={`${Math.floor(g.pct)} persen dari target. ${rest}`}>
+      <View style={{ height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.25)', overflow: 'hidden' }}>
+        <View style={{ width: `${g.pct}%`, height: '100%', borderRadius: 3, backgroundColor: '#FFFFFF' }} />
+      </View>
+      <Text style={{ color: '#FFFFFF', opacity: 0.9, fontVariant: ['tabular-nums'] }} numberOfLines={1}>
+        {rest}
+      </Text>
+    </View>
   );
 }

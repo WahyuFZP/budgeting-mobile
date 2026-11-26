@@ -5,10 +5,11 @@ import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-nativ
 import { initDb } from '../db/client';
 import { hasWallet, seedIfEmpty } from '../db/repo';
 import '../devtools';
-import { biometricEnabled, checkPin, hasPin, promptBiometric, useLock } from '../lock';
+import * as SecureStore from 'expo-secure-store';
+import { biometricAvailable, biometricEnabled, checkPin, hasPin, promptBiometric, setBiometric, useLock } from '../lock';
 import { useTheme } from '../theme';
-import { FeedbackHost } from '../feedback';
-import { Button, PinPad } from '../ui';
+import { confirm, FeedbackHost, toast } from '../feedback';
+import { PinPad } from '../ui';
 
 const RELOCK_AFTER_MS = 60_000; // short trips to the share sheet / file picker don't re-lock
 
@@ -81,6 +82,8 @@ export default function RootLayout() {
           <Stack.Screen name="sync" options={{ title: 'Sync' }} />
           <Stack.Screen name="settings" options={{ title: 'Pengaturan' }} />
           <Stack.Screen name="reminders" options={{ title: 'Pengingat' }} />
+          <Stack.Screen name="recurring" options={{ title: 'Tagihan & template' }} />
+          <Stack.Screen name="rule" options={{ presentation: 'modal', title: 'Tagihan atau template' }} />
         </Stack.Protected>
         <Stack.Protected guard={!onboarded}>
           <Stack.Screen name="onboarding" options={{ headerShown: false }} />
@@ -90,6 +93,18 @@ export default function RootLayout() {
       <FeedbackHost />
     </>
   );
+}
+
+// After a PIN unlock: if the phone has a fingerprint/face enrolled but Kas does not use it yet, ask once.
+// Covers people who skipped it during onboarding; "Nanti saja" is remembered, Pengaturan can still turn it on.
+async function offerBiometric() {
+  if ((await biometricEnabled()) || !(await biometricAvailable()) || (await SecureStore.getItemAsync('bio_offered'))) return;
+  await SecureStore.setItemAsync('bio_offered', '1');
+  const ok = await confirm({ title: 'Buka Kas dengan sidik jari?', body: 'Lebih cepat dari mengetik PIN. PIN tetap bisa dipakai kapan saja.', confirm: 'Aktifkan', cancel: 'Nanti saja', icon: 'fingerprint' });
+  if (ok && (await promptBiometric())) {
+    await setBiometric(true);
+    toast('Sidik jari aktif', 'success', 'Lain kali Kas terbuka dengan sidik jari atau wajah.');
+  }
 }
 
 function LockScreen({ onUnlock }: { onUnlock: () => void }) {
@@ -112,7 +127,10 @@ function LockScreen({ onUnlock }: { onUnlock: () => void }) {
 
   const submit = async (pin: string) => {
     if (Date.now() < waitUntil) return setError('Terlalu banyak percobaan, tunggu 30 detik');
-    if (await checkPin(pin)) return onUnlock();
+    if (await checkPin(pin)) {
+      onUnlock();
+      return offerBiometric();
+    }
     const n = fails + 1;
     setFails(n);
     if (n % 5 === 0) setWaitUntil(Date.now() + 30_000);
@@ -121,8 +139,7 @@ function LockScreen({ onUnlock }: { onUnlock: () => void }) {
 
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: t.bg, justifyContent: 'center', alignItems: 'center', gap: 24 }]} testID="lock-screen">
-      <PinPad title="Masukkan PIN" error={error} onComplete={submit} />
-      {bio && <Button kind="ghost" icon="fingerprint" title="Buka dengan sidik jari / wajah" onPress={tryBio} testID="lock-bio" />}
+      <PinPad title="Masukkan PIN" error={error} onComplete={submit} onBio={bio ? tryBio : undefined} />
     </View>
   );
 }

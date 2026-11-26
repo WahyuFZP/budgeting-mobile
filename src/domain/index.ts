@@ -148,7 +148,7 @@ export function validateTx(t: TxInput): string | null {
 
 // ---------- Reminders (bell on Beranda) ----------
 
-export type Reminder = { id: string; icon: 'backup' | 'budget-warn' | 'budget-over' | 'today'; title: string; body: string; href: '/backup' | '/budget' | '/tx' };
+export type Reminder = { id: string; icon: 'backup' | 'budget-warn' | 'budget-over' | 'today' | 'bill'; title: string; body: string; href: '/backup' | '/budget' | '/tx' | '/recurring' };
 
 /** Things worth the user's attention right now, most urgent first. Pure: derived only from the given facts. */
 export function reminders(f: {
@@ -158,8 +158,16 @@ export function reminders(f: {
   budgets: { name: string; limit: number; spent: number }[];
   hasAnyTx: boolean;
   hasTxToday: boolean;
+  bills?: { name: string; amount: number; due: Date }[];
 }): Reminder[] {
   const out: Reminder[] = [];
+  // money leaving on a date comes first: a late or due-today bill costs more than an over budget
+  for (const b of f.bills ?? []) {
+    const { state, days } = billState(b.due, f.now);
+    if (state === 'later') continue;
+    const when = state === 'late' ? `terlambat ${-days} hari` : state === 'today' ? 'jatuh tempo hari ini' : `jatuh tempo ${days} hari lagi`;
+    out.push({ id: `bill-${b.name}`, icon: 'bill', title: `${b.name} ${when}`, body: `${formatRupiah(b.amount)}. Ketuk Lunas untuk langsung mencatatnya.`, href: '/recurring' });
+  }
   for (const b of f.budgets) {
     const s = budgetStatus(b.limit, b.spent);
     if (s.level === 'over')
@@ -207,4 +215,47 @@ export function squirrelLines(f: {
   for (const r of f.reminderTitles) out.push(`${r}.`);
   out.push('Aku simpan biji ek untuk nanti. Kamu juga ya!');
   return out;
+}
+
+// ---------- Bills (monthly) and one-tap templates ----------
+
+/** What a recurring rule records: stored as JSON in recurring_rules.template. `day` is the due day for bills. */
+export type RuleTemplate = { name: string; type: TxType; amount: number; walletId: string | null; toWalletId: string | null; categoryId: string | null; note: string; day?: number };
+
+const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const onDay = (y: number, m: number, day: number) => new Date(y, m, Math.min(day, daysIn(y, m)));
+
+/** Due date one month after `from`, on `day` clamped to that month's length (31 -> 28 Feb -> 31 Mar). */
+export function nextMonthly(from: Date, day: number): Date {
+  const n = new Date(from.getFullYear(), from.getMonth() + 1, 1);
+  return onDay(n.getFullYear(), n.getMonth(), day);
+}
+
+/** First due date for a new bill: this month's `day` if it is still ahead (or today), else next month's. */
+export function firstDue(now: Date, day: number): Date {
+  const here = onDay(now.getFullYear(), now.getMonth(), day);
+  return here >= dayStart(now) ? here : nextMonthly(here, day);
+}
+
+/** late / today / soon (within 3 days) / later, plus whole days until due (negative when late). */
+export function billState(due: Date, now: Date) {
+  const days = Math.round((dayStart(due).getTime() - dayStart(now).getTime()) / DAY);
+  const state = days < 0 ? 'late' : days === 0 ? 'today' : days <= 3 ? 'soon' : 'later';
+  return { state, days } as { state: 'late' | 'today' | 'soon' | 'later'; days: number };
+}
+
+// ---------- Savings goals (a wallet with a target) ----------
+
+/** Progress toward a target. With a target date, also how much to set aside per month to make it in time. */
+export function goalProgress(balance: number, target: number, targetDate: Date | null, now: Date) {
+  const remaining = Math.max(0, target - balance);
+  const pct = target > 0 ? Math.min(100, Math.max(0, (balance / target) * 100)) : 0;
+  let perMonth: number | null = null;
+  let monthsLeft: number | null = null;
+  if (targetDate && remaining > 0) {
+    // months still available, counting the current one; a date already passed leaves one month (catch up now)
+    monthsLeft = Math.max(1, (targetDate.getFullYear() - now.getFullYear()) * 12 + targetDate.getMonth() - now.getMonth() + 1);
+    perMonth = Math.ceil(remaining / monthsLeft);
+  }
+  return { pct, remaining, done: target > 0 && remaining === 0, perMonth, monthsLeft };
 }

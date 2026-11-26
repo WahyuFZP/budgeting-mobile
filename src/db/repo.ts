@@ -1,9 +1,9 @@
 // Repository: the only place that writes to the database. Screens read via `q.*` + useLiveQuery.
 import { and, count, desc, eq, gte, isNull, like, lt, or } from 'drizzle-orm';
 import { randomUUID } from 'expo-crypto';
-import { validateTx, type Period, type TxType } from '../domain';
+import { firstDue, isValidAmount, nextMonthly, validateTx, type Period, type RuleTemplate, type TxType } from '../domain';
 import { db } from './client';
-import { budgets, categories, settings, transactions, wallets, type Category, type Wallet } from './schema';
+import { budgets, categories, recurringRules, settings, transactions, wallets, type Category, type Wallet } from './schema';
 
 export const OTHER_EXPENSE = 'default-expense-other';
 export const OTHER_INCOME = 'default-income-other';
@@ -42,6 +42,7 @@ export const q = {
       .groupBy(transactions.walletId),
   categoryUsage: () =>
     db.select({ categoryId: transactions.categoryId, n: count() }).from(transactions).where(alive(transactions)).groupBy(transactions.categoryId),
+  rules: () => db.select().from(recurringRules).where(alive(recurringRules)).orderBy(recurringRules.nextRunAt, recurringRules.createdAt),
   history: (f: HistoryFilter, limit: number) => {
     const c = [alive(transactions)];
     if (f.walletId) c.push(or(eq(transactions.walletId, f.walletId), eq(transactions.toWalletId, f.walletId))!);
@@ -93,14 +94,16 @@ export function seedIfEmpty() {
 
 // ---------- Wallets ----------
 
-export type WalletInput = Pick<Wallet, 'name' | 'type' | 'initialBalance' | 'color'> & { id?: string; archived?: boolean };
+export type WalletInput = Pick<Wallet, 'name' | 'type' | 'initialBalance' | 'color'> & { id?: string; archived?: boolean; targetAmount?: number | null; targetDate?: Date | null };
 // Material Community Icons names (see DESIGN.md); drizzle/0001_icons.sql moves old emoji rows over.
 export const WALLET_ICON = { cash: 'cash', bank: 'bank', ewallet: 'cellphone' } as const;
 
 export function saveWallet(w: WalletInput) {
   if (!w.name.trim()) throw new Error('Nama dompet wajib diisi');
   if (!Number.isSafeInteger(w.initialBalance)) throw new Error('Saldo awal tidak valid');
-  const values = { name: w.name.trim(), type: w.type, icon: WALLET_ICON[w.type], color: w.color, initialBalance: w.initialBalance, archived: !!w.archived };
+  if (w.targetAmount != null && !isValidAmount(w.targetAmount)) throw new Error('Target harus lebih dari 0');
+  const target = w.targetAmount ?? null;
+  const values = { name: w.name.trim(), type: w.type, icon: WALLET_ICON[w.type], color: w.color, initialBalance: w.initialBalance, archived: !!w.archived, targetAmount: target, targetDate: target ? (w.targetDate ?? null) : null };
   if (w.id) db.update(wallets).set({ ...values, updatedAt: new Date() }).where(eq(wallets.id, w.id)).run();
   else db.insert(wallets).values({ id: randomUUID(), ...values, ...stamp() }).run();
 }
@@ -143,9 +146,11 @@ export type TxSave = {
   categoryId: string | null;
   occurredAt: Date;
   note: string;
+  recurringRuleId?: string;
 };
 
-export function saveTx(t: TxSave) {
+/** Returns the transaction id (new or edited), so a caller can offer undo. */
+export function saveTx(t: TxSave): string {
   const err = validateTx(t);
   if (err) throw new Error(err);
   const transfer = t.type === 'transfer';
@@ -158,14 +163,22 @@ export function saveTx(t: TxSave) {
     occurredAt: t.occurredAt,
     note: t.note.trim() || null,
   };
+  const id = t.id ?? randomUUID();
   if (t.id) db.update(transactions).set({ ...values, updatedAt: new Date() }).where(eq(transactions.id, t.id)).run();
-  else db.insert(transactions).values({ id: randomUUID(), ...values, ...stamp() }).run();
+  else db.insert(transactions).values({ id, ...values, recurringRuleId: t.recurringRuleId ?? null, ...stamp() }).run();
   setSetting('last_wallet', t.walletId!);
+  if (!transfer && t.categoryId) setSetting(`last_cat_${t.type}`, t.categoryId); // per type: income and expense never share a category
+  return id;
 }
 
 export function deleteTx(id: string) {
   const now = new Date();
   db.update(transactions).set({ deletedAt: now, updatedAt: now }).where(eq(transactions.id, id)).run();
+}
+
+/** Undo of deleteTx: updatedAt moves forward so sync treats the restore as the newer change. */
+export function restoreTx(id: string) {
+  db.update(transactions).set({ deletedAt: null, updatedAt: new Date() }).where(eq(transactions.id, id)).run();
 }
 
 /** Spent in a category during a period, excluding one transaction (the one being edited). */
@@ -210,4 +223,44 @@ export function copyBudgets(from: Period, to: Period) {
   const src = q.budgets(from).all().filter((b) => !have.has(b.categoryId));
   for (const b of src) setBudget(b.categoryId, to, b.limitAmount);
   return src.length;
+}
+
+// ---------- Bills (monthly) and one-tap templates ----------
+
+export type Rule = typeof recurringRules.$inferSelect;
+export const ruleTemplate = (r: Rule) => JSON.parse(r.template) as RuleTemplate;
+
+/** A bill has a due `day` (1-31); a template has none. Validated like the transaction it will record. */
+export function saveRule(id: string | undefined, t: RuleTemplate, now = new Date()) {
+  if (!t.name.trim()) throw new Error('Nama wajib diisi');
+  const err = validateTx(t);
+  if (err) throw new Error(err);
+  const bill = t.day != null;
+  if (bill && !(Number.isInteger(t.day) && t.day! >= 1 && t.day! <= 31)) throw new Error('Tanggal jatuh tempo 1 sampai 31');
+  const template = JSON.stringify({ ...t, name: t.name.trim(), note: t.note.trim(), toWalletId: t.type === 'transfer' ? t.toWalletId : null, categoryId: t.type === 'transfer' ? null : t.categoryId });
+  const old = id ? db.select().from(recurringRules).where(eq(recurringRules.id, id)).get() : undefined;
+  const oldDay = old ? ruleTemplate(old).day : undefined;
+  // keep the scheduled date unless the due day changed (or it just became a bill)
+  const nextRunAt = !bill ? new Date(0) : old && old.frequency === 'monthly' && oldDay === t.day ? old.nextRunAt : firstDue(now, t.day!);
+  const values = { template, frequency: bill ? ('monthly' as const) : ('none' as const), nextRunAt };
+  if (id) db.update(recurringRules).set({ ...values, updatedAt: new Date() }).where(eq(recurringRules.id, id)).run();
+  else db.insert(recurringRules).values({ id: randomUUID(), ...values, ...stamp() }).run();
+}
+
+export function deleteRule(id: string) {
+  const now = new Date();
+  db.update(recurringRules).set({ deletedAt: now, updatedAt: now }).where(eq(recurringRules.id, id)).run();
+}
+
+/** Records the rule as a transaction now; a bill also moves to its next due date. Returns what undoRun needs. */
+export function runRule(r: Rule, now = new Date()) {
+  const t = ruleTemplate(r);
+  const txId = saveTx({ ...t, occurredAt: now, recurringRuleId: r.id });
+  if (r.frequency === 'monthly') db.update(recurringRules).set({ nextRunAt: nextMonthly(r.nextRunAt, t.day!), updatedAt: new Date() }).where(eq(recurringRules.id, r.id)).run();
+  return { txId, ruleId: r.id, prevNext: r.nextRunAt };
+}
+
+export function undoRun(u: ReturnType<typeof runRule>) {
+  deleteTx(u.txId);
+  db.update(recurringRules).set({ nextRunAt: u.prevNext, updatedAt: new Date() }).where(eq(recurringRules.id, u.ruleId)).run();
 }

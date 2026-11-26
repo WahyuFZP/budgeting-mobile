@@ -4,10 +4,10 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { crossedLevel, formatRupiah, parseRupiah, periodFor, type TxType } from '../domain';
-import { deleteTx, getTx, q, saveTx, spentInCategory } from '../db/repo';
+import { deleteTx, getTx, q, restoreTx, saveTx, spentInCategory } from '../db/repo';
 import { fmtDate, useCategories, useSettings, useWallets } from '../hooks';
 import { useTheme } from '../theme';
-import { confirm, toast } from '../feedback';
+import { toast } from '../feedback';
 import { Button, Chip, Field, Icon, ItemIcon, Muted, Row, Screen, s, type IconName } from '../ui';
 
 const TYPES: [TxType, string, IconName][] = [
@@ -22,14 +22,14 @@ export default function TxScreen() {
   const existing = useMemo(() => (id ? getTx(id) : undefined), [id]);
   const { active } = useWallets();
   const categories = useCategories();
-  const { lastWallet, payday } = useSettings();
+  const { lastWallet, lastCat, payday } = useSettings();
   const { data: usage } = useLiveQuery(q.categoryUsage());
 
   const [type, setType] = useState<TxType>(existing?.type ?? 'expense');
   const [amount, setAmount] = useState(existing ? String(existing.amount) : '');
   const [walletId, setWalletId] = useState<string | null>(existing?.walletId ?? null);
   const [toWalletId, setToWalletId] = useState<string | null>(existing?.toWalletId ?? null);
-  const [categoryId, setCategoryId] = useState<string | null>(existing?.categoryId ?? null);
+  const [picked, setCategoryId] = useState<string | null>(existing?.categoryId ?? null);
   const [date, setDate] = useState(existing?.occurredAt ?? new Date());
   const [note, setNote] = useState(existing?.note ?? '');
   const [picking, setPicking] = useState(false);
@@ -38,8 +38,10 @@ export default function TxScreen() {
   const wallet = walletId ?? (active.find((w) => w.id === lastWallet) ?? active[0])?.id ?? null;
   const used = new Map(usage.map((u) => [u.categoryId, u.n]));
   const cats = categories
-    .filter((c) => c.kind === (type === 'income' ? 'income' : 'expense') && (!c.hidden || c.id === categoryId))
+    .filter((c) => c.kind === (type === 'income' ? 'income' : 'expense') && (!c.hidden || c.id === picked))
     .sort((a, b) => (used.get(b.id) ?? 0) - (used.get(a.id) ?? 0)); // most used first
+  // new entry: preselect the category last used for this type, so a routine entry is just amount + Simpan
+  const categoryId = picked ?? (!existing && type !== 'transfer' ? (cats.find((c) => c.id === lastCat[type])?.id ?? null) : null);
 
   const n = parseRupiah(amount) ?? 0;
 
@@ -65,11 +67,12 @@ export default function TxScreen() {
     } else toast(existing ? 'Transaksi diperbarui' : 'Transaksi disimpan', 'success', `${type === 'income' ? 'Pemasukan' : type === 'expense' ? 'Pengeluaran' : 'Transfer'} ${formatRupiah(n)}`);
   };
 
-  const remove = async () => {
-    if (!(await confirm({ title: 'Hapus transaksi?', body: `${formatRupiah(existing!.amount)} akan dihapus dari saldo dan riwayat.`, confirm: 'Hapus', destructive: true }))) return;
-    deleteTx(existing!.id);
+  // soft delete, so a 5 s undo in the toast replaces the confirm dialog
+  const remove = () => {
+    const id = existing!.id;
+    deleteTx(id);
     router.back();
-    toast('Transaksi dihapus', 'info');
+    toast('Transaksi dihapus', 'info', formatRupiah(existing!.amount), { label: 'Urungkan', onPress: () => (restoreTx(id), toast('Transaksi dikembalikan')) });
   };
 
   // Date shortcuts: most entries are today or yesterday, so those are one tap; anything else opens the picker.

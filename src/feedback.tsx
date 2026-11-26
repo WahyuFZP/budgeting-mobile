@@ -11,7 +11,8 @@ import { useTheme } from './theme';
 import { Icon, type IconName } from './ui';
 
 type Kind = 'success' | 'warn' | 'error' | 'info';
-type Toast = { id: number; kind: Kind; title: string; body?: string };
+type Action = { label: string; onPress: () => void };
+type Toast = { id: number; kind: Kind; title: string; body?: string; action?: Action };
 type Dialog = { title: string; body?: string; confirm: string; cancel?: string; destructive?: boolean; icon?: IconName; resolve: (ok: boolean) => void };
 
 const useFeedback = create<{ toast: Toast | null; dialog: Dialog | null }>(() => ({ toast: null, dialog: null }));
@@ -24,12 +25,12 @@ const HAPTIC: Record<Kind, () => void> = {
   info: () => Haptics.selectionAsync(),
 };
 
-export function toast(title: string, kind: Kind = 'success', body?: string) {
+export function toast(title: string, kind: Kind = 'success', body?: string, action?: Action) {
   HAPTIC[kind]();
-  useFeedback.setState({ toast: { id: Date.now(), kind, title, body } });
+  useFeedback.setState({ toast: { id: Date.now(), kind, title, body, action } });
   clearTimeout(hideTimer);
-  // errors and warnings stay longer: they usually need reading
-  hideTimer = setTimeout(() => useFeedback.setState({ toast: null }), kind === 'error' || kind === 'warn' ? 4500 : 2600);
+  // errors, warnings and toasts with an action (undo) stay longer: they need reading or a decision
+  hideTimer = setTimeout(() => useFeedback.setState({ toast: null }), action ? 5000 : kind === 'error' || kind === 'warn' ? 4500 : 2600);
 }
 
 export function confirm(o: Omit<Dialog, 'resolve'>): Promise<boolean> {
@@ -79,6 +80,20 @@ export function FeedbackHost() {
                 <Text style={{ color: t.text, fontWeight: '700' }}>{tst.title}</Text>
                 {tst.body ? <Text style={{ color: t.muted }}>{tst.body}</Text> : null}
               </View>
+              {tst.action && (
+                <Pressable
+                  onPress={() => {
+                    useFeedback.setState({ toast: null });
+                    tst.action!.onPress();
+                  }}
+                  accessibilityRole="button"
+                  testID="toast-action"
+                  hitSlop={8}
+                  style={({ pressed }) => ({ minHeight: 44, paddingHorizontal: 14, borderRadius: 12, justifyContent: 'center', backgroundColor: t.bg, opacity: pressed ? 0.6 : 1 })}
+                >
+                  <Text style={{ color: t.mark, fontWeight: '800' }}>{tst.action.label}</Text>
+                </Pressable>
+              )}
             </Pressable>
           </Animated.View>
         )}

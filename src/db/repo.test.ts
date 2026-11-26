@@ -104,7 +104,20 @@ describe('catat transaksi & saldo', () => {
     repo.saveTx(tx({ type: 'income', amount: 75_000, walletId: bank, categoryId: 'default-income-bonus' }));
     expect(repo.q.history({}, 1).all()[0].walletId).toBe(bank);
     expect(repo.getSetting('last_wallet')).toBe(bank);
+    expect(repo.getSetting('last_cat_income')).toBe('default-income-bonus');
+    expect(repo.getSetting('last_cat_expense')).toBeFalsy();
     expect(balances().get(bank)).toBe(1_075_000);
+  });
+  test('undo after delete brings the transaction and its effect on the balance back', () => {
+    const { cash } = setup();
+    repo.saveTx(tx({ amount: 20_000, walletId: cash }));
+    const id = repo.q.history({}, 1).all()[0].id;
+    const before = balances().get(cash);
+    repo.deleteTx(id);
+    expect(balances().get(cash)).toBe(before! + 20_000);
+    repo.restoreTx(id);
+    expect(repo.q.history({}, 10).all().map((t) => t.id)).toContain(id);
+    expect(balances().get(cash)).toBe(before);
   });
   test('edit replaces, delete is soft and disappears from every query', () => {
     const { cash } = setup();
@@ -216,5 +229,56 @@ describe('migrasi', () => {
       { id: 'default-expense-food', icon: 'silverware-fork-knife', updated_at: 0 },
     ]);
     expect(T.sqlite.prepare('SELECT icon, updated_at FROM wallets').get()).toEqual({ icon: 'cash', updated_at: 5 });
+  });
+});
+
+describe('bills and templates', () => {
+  const bill = (walletId: string, day = 28) => ({ name: 'Kos', type: 'expense' as const, amount: 1_500_000, walletId, toWalletId: null, categoryId: 'default-expense-bills', note: '', day });
+  test('a new bill is due on its day this month; paying records it and moves to next month; undo puts both back', () => {
+    const { bank } = setup();
+    repo.saveRule(undefined, bill(bank), day(26));
+    const [r] = repo.q.rules().all();
+    expect(r.frequency).toBe('monthly');
+    expect(r.nextRunAt).toEqual(new Date(2026, 10, 28));
+    const u = repo.runRule(r, day(27));
+    expect(repo.q.history({}, 5).all()[0]).toMatchObject({ amount: 1_500_000, recurringRuleId: r.id, categoryId: 'default-expense-bills' });
+    expect(repo.q.rules().all()[0].nextRunAt).toEqual(new Date(2026, 11, 28));
+    repo.undoRun(u);
+    expect(repo.q.history({}, 5).all()).toHaveLength(0);
+    expect(repo.q.rules().all()[0].nextRunAt).toEqual(new Date(2026, 10, 28));
+  });
+  test('a template has no schedule and can run any number of times', () => {
+    const { cash } = setup();
+    repo.saveRule(undefined, { ...bill(cash), name: 'Kopi', amount: 18_000, categoryId: 'default-expense-food', day: undefined });
+    const [r] = repo.q.rules().all();
+    expect(r.frequency).toBe('none');
+    repo.runRule(r);
+    repo.runRule(repo.q.rules().all()[0]);
+    expect(repo.q.history({}, 5).all()).toHaveLength(2);
+  });
+  test('invalid rules are refused like transactions are', () => {
+    const { cash } = setup();
+    expect(() => repo.saveRule(undefined, { ...bill(cash), name: ' ' })).toThrow('Nama wajib diisi');
+    expect(() => repo.saveRule(undefined, { ...bill(cash), amount: 0 })).toThrow('Nominal harus lebih dari 0');
+    expect(() => repo.saveRule(undefined, { ...bill(cash), day: 32 })).toThrow('Tanggal jatuh tempo 1 sampai 31');
+  });
+  test('editing a bill keeps its schedule unless the due day changes', () => {
+    const { bank } = setup();
+    repo.saveRule(undefined, bill(bank), day(26));
+    const id = repo.q.rules().all()[0].id;
+    repo.runRule(repo.q.rules().all()[0], day(27)); // next: 28 Dec
+    repo.saveRule(id, { ...bill(bank), amount: 1_600_000 }, day(27));
+    expect(repo.q.rules().all()[0].nextRunAt).toEqual(new Date(2026, 11, 28));
+    repo.saveRule(id, bill(bank, 5), day(27));
+    expect(repo.q.rules().all()[0].nextRunAt).toEqual(new Date(2026, 11, 5));
+  });
+  test('a wallet target is stored with its date and cleared together with it', () => {
+    setup();
+    const w = repo.q.wallets().all()[0];
+    repo.saveWallet({ ...w, targetAmount: 5_000_000, targetDate: new Date(2027, 5, 1) });
+    expect(repo.getWallet(w.id)).toMatchObject({ targetAmount: 5_000_000, targetDate: new Date(2027, 5, 1) });
+    repo.saveWallet({ ...w, targetAmount: null, targetDate: new Date(2027, 5, 1) });
+    expect(repo.getWallet(w.id)).toMatchObject({ targetAmount: null, targetDate: null });
+    expect(() => repo.saveWallet({ ...w, targetAmount: -1 })).toThrow('Target harus lebih dari 0');
   });
 });

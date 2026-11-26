@@ -6,12 +6,12 @@ import { useReminders } from '../hooks';
 import { useTheme } from '../theme';
 import { Card, EmptyState, Icon, PressScale, Row, Screen, type IconName } from '../ui';
 
-const ICON: Record<Reminder['icon'], IconName> = { backup: 'backup-restore', 'budget-warn': 'alert-circle-outline', 'budget-over': 'alert-octagon', today: 'pencil-plus' };
+const ICON: Record<Reminder['icon'], IconName> = { bill: 'calendar-alert', backup: 'backup-restore', 'budget-warn': 'alert-circle-outline', 'budget-over': 'alert-octagon', today: 'pencil-plus' };
 
 export default function RemindersScreen() {
   const t = useTheme();
   const list = useReminders();
-  const tone = (r: Reminder) => (r.icon === 'budget-over' ? t.expense : r.icon === 'budget-warn' || r.icon === 'backup' ? t.warn : t.mark);
+  const tone = (r: Reminder) => (r.icon === 'budget-over' ? t.expense : r.icon === 'budget-warn' || r.icon === 'backup' || r.icon === 'bill' ? t.warn : t.mark);
 
   return (
     <Screen>

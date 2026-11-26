@@ -78,6 +78,12 @@ export function TabBar({ state, descriptors, emitter, navigateToTab }: BottomTab
   };
 
   return (
+    <>
+    {/* content scrolling under the bar fades into the page instead of colliding with it; touches pass through */}
+    <Animated.View
+      pointerEvents="none"
+      style={[{ position: 'absolute', left: 0, right: 0, bottom: 0, height: insets.bottom + 12 + BAR + 36, backgroundImage: `linear-gradient(to bottom, ${t.bg}00 0%, ${t.bg}E6 55%, ${t.bg} 100%)` }, slide]}
+    />
     <Animated.View
       onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
       style={[
@@ -127,5 +133,6 @@ export function TabBar({ state, descriptors, emitter, navigateToTab }: BottomTab
       </View>
       {state.routes.slice(mid).map((r, i) => tab(r, i + mid))}
     </Animated.View>
+    </>
   );
 }
