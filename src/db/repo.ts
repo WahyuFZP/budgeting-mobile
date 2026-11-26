@@ -33,6 +33,7 @@ export const q = {
       .from(transactions)
       .where(and(alive(transactions), gte(transactions.occurredAt, p.start), lt(transactions.occurredAt, p.end))),
   budgets: (p: Period) => db.select().from(budgets).where(and(alive(budgets), eq(budgets.periodStart, p.start))),
+  tx: (id: string) => db.select().from(transactions).where(eq(transactions.id, id)),
   walletTxCount: (p: Period) =>
     db
       .select({ walletId: transactions.walletId, n: count() })

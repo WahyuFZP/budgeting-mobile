@@ -2,6 +2,8 @@ import {
   budgetStatus,
   crossedLevel,
   pace,
+  reminders,
+  squirrelLines,
   formatRupiah,
   nextPeriod,
   parseRupiah,
@@ -139,5 +141,48 @@ describe('pace', () => {
   test('payday period crossing the month end', () => {
     const q = periodFor(new Date(2026, 10, 30), 25); // 25 Nov - 24 Dec
     expect(pace(300_000, 0, q, new Date(2026, 11, 22)).daysLeft).toBe(3);
+  });
+});
+
+describe('reminders', () => {
+  const now = new Date(2026, 10, 26, 20);
+  const base = { now, lastBackup: now.getTime(), firstUse: now.getTime(), budgets: [], hasAnyTx: true, hasTxToday: true };
+  test('nothing to say when everything is fine', () => expect(reminders(base)).toEqual([]));
+  test('over budget first, then almost spent, then backup, then today', () => {
+    const r = reminders({
+      ...base,
+      lastBackup: now.getTime() - 40 * 86_400_000,
+      hasTxToday: false,
+      budgets: [
+        { name: 'Makan', limit: 100_000, spent: 85_000 },
+        { name: 'Hiburan', limit: 50_000, spent: 60_000 },
+        { name: 'Transport', limit: 100_000, spent: 10_000 },
+      ],
+    });
+    expect(r.map((x) => x.id)).toEqual(['over-Hiburan', 'warn-Makan', 'backup', 'today']);
+    expect(r[2].title).toBe('Sudah 40 hari tanpa backup');
+  });
+  test('never backed up counts from first use; no "today" nag before the first transaction', () => {
+    const r = reminders({ ...base, lastBackup: null, firstUse: now.getTime() - 31 * 86_400_000, hasAnyTx: false, hasTxToday: false });
+    expect(r.map((x) => x.title)).toEqual(['Belum pernah backup']);
+  });
+});
+
+describe('squirrelLines', () => {
+  const base = { budget: { limit: 1_000_000, remaining: 600_000, level: 'ok' as const }, perDay: 100_000, daysLeft: 6, spentToday: 25_000, hasAnyTx: true, reminderTitles: [], hidden: false };
+  test('allowance first, then today, then the sign-off', () => {
+    expect(squirrelLines(base)).toEqual([
+      'Jatah belanja hari ini Rp100.000. Masih aman!',
+      'Hari ini sudah keluar Rp25.000.',
+      'Aku simpan biji ek untuk nanti. Kamu juga ya!',
+    ]);
+  });
+  test('warns when almost spent, nudges when no budget, passes reminders through', () => {
+    expect(squirrelLines({ ...base, budget: { limit: 100, remaining: 10, level: 'warn' } })[0]).toContain('sisa budget Rp10 untuk 6 hari');
+    expect(squirrelLines({ ...base, budget: { limit: 0, remaining: 0, level: 'ok' }, reminderTitles: ['Belum pernah backup'] })).toContain('Belum pernah backup.');
+    expect(squirrelLines({ ...base, budget: { limit: 0, remaining: 0, level: 'ok' } })[0]).toContain('Atur budget');
+  });
+  test('never reveals amounts while balances are hidden', () => {
+    expect(squirrelLines({ ...base, hidden: true }).join(' ')).not.toMatch(/Rp\d/);
   });
 });

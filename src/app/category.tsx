@@ -1,10 +1,11 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, Switch, Text, View } from 'react-native';
+import { Pressable, Switch, Text, View } from 'react-native';
 import { deleteCategory, getCategory, saveCategory } from '../db/repo';
 import type { Category } from '../db/schema';
 import { PALETTE, useTheme } from '../theme';
 import { Button, Chip, ColorPicker, Field, ItemIcon, Muted, Row, Screen, s, type IconName } from '../ui';
+import { confirm, toast } from '../feedback';
 
 // Picked for what Indonesians actually spend on and earn from; no generic decorative glyphs.
 const ICONS: IconName[] = [
@@ -29,23 +30,19 @@ export default function CategoryScreen() {
     try {
       saveCategory({ id: c?.id, name, kind, icon, color, hidden });
       router.back();
+      toast(c ? 'Kategori diperbarui' : 'Kategori ditambahkan', 'success', name.trim());
     } catch (e) {
-      Alert.alert('Belum bisa disimpan', (e as Error).message);
+      toast('Belum bisa disimpan', 'error', (e as Error).message);
     }
   };
 
-  const remove = () =>
-    Alert.alert('Hapus kategori?', 'Transaksi di kategori ini dipindah ke "Lainnya". Budget kategori ini ikut dihapus.', [
-      { text: 'Batal', style: 'cancel' },
-      {
-        text: 'Hapus',
-        style: 'destructive',
-        onPress: () => {
-          deleteCategory(c!.id);
-          router.back();
-        },
-      },
-    ]);
+  const remove = async () => {
+    const ok = await confirm({ title: `Hapus kategori ${c!.name}?`, body: 'Transaksinya dipindah ke "Lainnya", tidak ikut terhapus. Budget kategori ini ikut dihapus.', confirm: 'Hapus', destructive: true });
+    if (!ok) return;
+    deleteCategory(c!.id);
+    router.back();
+    toast('Kategori dihapus', 'info', 'Transaksinya sekarang di "Lainnya".');
+  };
 
   return (
     <Screen>

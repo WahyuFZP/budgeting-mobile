@@ -137,7 +137,7 @@ async function deleteTagged(note) {
   const rows = screen().filter((n) => n.id.startsWith('tx-'));
   if (rows.length !== 1) throw new Error(`pencarian "${note}" harusnya 1 baris, dapat ${rows.length}`);
   await tap(rows[0]);
-  await tap(await byId('delete-tx'));
+  await tap(await byId('detail-delete')); // a row opens the ticket detail first
   await tap(await waitFor((n) => /^hapus$/i.test(n.text), 'tombol konfirmasi Hapus'));
   await waitFor((n) => n.id === 'search', 'kembali ke Riwayat');
 }

@@ -3,7 +3,7 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { formatRupiah, nextPeriod, periodFor, prevPeriod, spentByCategory, totals } from '../../domain';
 import { exportPeriodXlsx } from '../../db/export';
@@ -11,6 +11,7 @@ import { q } from '../../db/repo';
 import { fmtPeriod, useCategories, useSettings } from '../../hooks';
 import { useTheme } from '../../theme';
 import { Bar, Button, Card, EmptyState, H, Icon, PressScale, ItemIcon, Muted, Row, Screen } from '../../ui';
+import { toast } from '../../feedback';
 
 export default function ReportScreen() {
   const t = useTheme();
@@ -38,7 +39,7 @@ export default function ReportScreen() {
     try {
       await exportPeriodXlsx(period);
     } catch (e) {
-      Alert.alert('Belum bisa diekspor', (e as Error).message);
+      toast('Belum bisa diekspor', 'error', (e as Error).message);
     } finally {
       setBusy(false);
     }

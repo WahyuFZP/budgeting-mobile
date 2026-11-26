@@ -1,19 +1,22 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, Switch, Text, View } from 'react-native';
+import { Pressable, Switch, Text, View } from 'react-native';
 import { formatRupiah } from '../domain';
 import { setSetting } from '../db/repo';
 import { useCategories, useSettings, useWallets } from '../hooks';
 import { biometricAvailable, biometricEnabled, promptBiometric, setBiometric } from '../lock';
 import { useTheme } from '../theme';
 import { Button, Card, Field, H, Icon, ItemIcon, Muted, Row, Screen } from '../ui';
+import { toast } from '../feedback';
 
 export default function SettingsScreen() {
   const t = useTheme();
   const { wallets, balances } = useWallets();
   const categories = useCategories();
-  const { payday } = useSettings();
+  const { payday, nickname } = useSettings();
   const [day, setDay] = useState(String(payday));
+  const [name, setName] = useState(nickname);
+  useEffect(() => setName(nickname), [nickname]);
   const [bio, setBio] = useState(false);
   const [bioOk, setBioOk] = useState(false);
 
@@ -25,9 +28,9 @@ export default function SettingsScreen() {
 
   const savePayday = () => {
     const n = Number(day);
-    if (!Number.isInteger(n) || n < 1 || n > 31) return Alert.alert('Tanggal gajian harus 1–31');
+    if (!Number.isInteger(n) || n < 1 || n > 31) return toast('Tanggal gajian harus 1 sampai 31', 'error');
     setSetting('payday', String(n));
-    Alert.alert('Tersimpan', 'Periode budget baru dimulai tiap tanggal ' + n);
+    toast('Tanggal gajian disimpan', 'success', `Periode budget dimulai tiap tanggal ${n}`);
   };
 
   const toggleBio = async (on: boolean) => {
@@ -54,6 +57,13 @@ export default function SettingsScreen() {
 
   return (
     <Screen>
+      <Card>
+        <H>Profil</H>
+        <Muted>Dipakai untuk sapaan di Beranda. Tersimpan hanya di HP ini.</Muted>
+        <Field label="Nama panggilan" value={name} onChangeText={setName} placeholder="Nama Anda" maxLength={24} autoCapitalize="words" testID="nickname" />
+        <Button kind="ghost" icon="account-check" title="Simpan nama" onPress={() => (setSetting('nickname', name.trim()), toast('Nama disimpan', 'success'))} testID="save-nickname" />
+      </Card>
+
       <Card>
         <Row style={{ justifyContent: 'space-between' }}>
           <H>Dompet</H>
